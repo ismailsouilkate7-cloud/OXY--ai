@@ -862,7 +862,9 @@ function buildFileAttachments(files) {
             let actionsHtml = '';
             if (f.url) {
                 if (f.type === 'application/pdf') {
-                    actionsHtml += `<button class="file-card-btn preview-btn" onclick="event.stopPropagation();window.open('${f.url}','_blank')" title="Preview"><i class="fa-solid fa-eye"></i></button>`;
+                    const escapedUrl = f.url.replace(/'/g, '\\x27');
+                    const escapedName = (f.name || 'document.pdf').replace(/'/g, '\\x27');
+                    actionsHtml += `<button class="file-card-btn preview-btn" onclick="event.stopPropagation();if(window.OXYPDFViewer){window.OXYPDFViewer.openPdf('${escapedUrl}','${escapedName}')}else{window.open('${escapedUrl}','_blank')}" title="Preview"><i class="fa-solid fa-eye"></i></button>`;
                 }
                 actionsHtml += `<button class="file-card-btn" onclick="event.stopPropagation();window.open('${f.url}','_blank')" title="Download"><i class="fa-solid fa-download"></i></button>`;
             }

@@ -539,12 +539,16 @@ export {
 };
 
 // ============================================================
-// MULTI-API-KEY FALLBACK SYSTEM
+// ENVIRONMENT VALIDATION
 // ============================================================
 
 // Read all configured API keys into an array (only non-empty keys)
+// Supports both GEMINI_API_KEY and GEMINI_API_KEY_1 through _5 naming.
+// All keys are verified at runtime — invalid keys are caught by isKeyFailure().
+// On 429/401/403 errors, the fallback system automatically rotates to the next key.
 const API_KEYS = [
     process.env.GEMINI_API_KEY,
+    process.env.GEMINI_API_KEY_1,
     process.env.GEMINI_API_KEY_2,
     process.env.GEMINI_API_KEY_3,
     process.env.GEMINI_API_KEY_4,
@@ -553,8 +557,23 @@ const API_KEYS = [
 
 if (API_KEYS.length === 0) {
     console.error('[API Keys] ❌ No API keys configured! Set GEMINI_API_KEY in .env');
-    process.exit(1);
+    // Do NOT exit — Vercel serverless functions should never process.exit
+    // The /api/chat endpoint will return an appropriate error to the client
 }
+
+// Environment validation middleware — returns JSON if critical env vars are missing
+// This prevents crashes at runtime when env vars are absent on Vercel
+function validateEnv(req, res, next) {
+    // Only validate for API routes that need keys
+    if (req.path.startsWith('/api/chat') && API_KEYS.length === 0) {
+        console.error('[Env] ❌ /api/chat called but no API keys configured');
+        return res.status(500).json({ error: 'Server configuration error: missing API key. Contact the administrator.' });
+    }
+    next();
+}
+
+// Apply env validation to all /api routes
+app.use('/api', validateEnv);
 
 console.log(`[API Keys] ✅ Loaded ${API_KEYS.length} API key(s) (${API_KEYS.length > 1 ? 'fallback enabled' : 'single key mode'})`);
 API_KEYS.forEach((key, i) => {
@@ -809,24 +828,10 @@ async function generateWithKeyFallback(params) {
 // ============================================================
 
 async function extractPdfText(buffer) {
-    try {
-        // Dynamically import pdf-parse only when needed (not at server startup)
-        // This prevents DOMMatrix errors on Vercel/server-side environments
-        let pdfParse;
-        try {
-            const pdfParseModule = await import('pdf-parse');
-            pdfParse = pdfParseModule.default || pdfParseModule;
-        } catch (importErr) {
-            console.warn('[PDF Parse] ⚠️ pdf-parse not available (server environment), using fallback');
-            return '[PDF content extraction unavailable in server environment]';
-        }
-
-        const data = await pdfParse(buffer);
-        return data.text.substring(0, 50000);
-    } catch (err) {
-        console.error('[PDF Parse] Error:', err.message);
-        return '[Could not extract PDF text]';
-    }
+    // PDF text extraction is done client-side only — no server-side PDF parsing
+    // to avoid DOMMatrix/DOMPoint crashes on Vercel (pdfjs-dist imports DOM APIs)
+    console.log('[PDF] PDF uploaded — text extraction delegated to browser');
+    return '[PDF uploaded — text will be extracted client-side when viewed]';
 }
 
 async function extractDocxText(buffer) {
@@ -976,8 +981,9 @@ app.post('/api/upload', upload.array('files', 10), async (req, res) => {
         res.json({ files: uploadedFiles });
 
     } catch (error) {
-        console.error('[Upload] Error:', error);
-        res.status(500).json({ error: 'File upload failed' });
+        console.error('[Upload] ❌ Error:', error);
+        console.error('[Upload] Stack:', error.stack);
+        return res.status(500).json({ error: 'File upload failed' });
     }
 });
 
@@ -1000,10 +1006,15 @@ function conversationMemoryMiddleware(req, res, next) {
 app.use('/api/chat', conversationMemoryMiddleware);
 
 // Endpoint to retrieve conversation context
-app.get('/api/context/:sessionId', (req, res) => {
-    const { sessionId } = req.params;
-    const context = getConversationContext(sessionId, 20);
-    res.json({ context });
+app.get('/api/context/:sessionId', (req, res, next) => {
+    try {
+        const { sessionId } = req.params;
+        const context = getConversationContext(sessionId, 20);
+        res.json({ context });
+    } catch (err) {
+        console.error('[Context] Error:', err.message);
+        res.status(500).json({ error: 'Failed to retrieve context' });
+    }
 });
 
 // ============================================================
