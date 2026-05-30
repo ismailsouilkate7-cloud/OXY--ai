@@ -4,8 +4,6 @@ import dotenv from 'dotenv';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import multer from 'multer';
-import * as pdfParseModule from 'pdf-parse';
-const pdfParse = pdfParseModule.default || pdfParseModule;
 import JSZip from 'jszip';
 import mime from 'mime-types';
 import { v4 as uuidv4 } from 'uuid';
@@ -812,6 +810,17 @@ async function generateWithKeyFallback(params) {
 
 async function extractPdfText(buffer) {
     try {
+        // Dynamically import pdf-parse only when needed (not at server startup)
+        // This prevents DOMMatrix errors on Vercel/server-side environments
+        let pdfParse;
+        try {
+            const pdfParseModule = await import('pdf-parse');
+            pdfParse = pdfParseModule.default || pdfParseModule;
+        } catch (importErr) {
+            console.warn('[PDF Parse] ⚠️ pdf-parse not available (server environment), using fallback');
+            return '[PDF content extraction unavailable in server environment]';
+        }
+
         const data = await pdfParse(buffer);
         return data.text.substring(0, 50000);
     } catch (err) {
