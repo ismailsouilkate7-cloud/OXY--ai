@@ -98,10 +98,17 @@ app.use(express.static(path.join(__dirname, 'public'), {
     maxAge: '1d' // 1 day caching
 }));
 
-// Ensure uploads directory exists
-const UPLOADS_DIR = path.join(__dirname, 'public', 'uploads');
-if (!fs.existsSync(UPLOADS_DIR)) {
-    fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+// For Vercel serverless: use /tmp for file storage (read-only filesystem in production)
+// For local: use public/uploads as fallback
+const isVercel = !!process.env.VERCEL || !!process.env.VERCEL_ENV;
+const UPLOADS_DIR = isVercel ? path.join('/tmp', 'uploads') : path.join(__dirname, 'public', 'uploads');
+try {
+    if (!fs.existsSync(UPLOADS_DIR)) {
+        fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+    }
+    console.log(`[Uploads] Using directory: ${UPLOADS_DIR}`);
+} catch (err) {
+    console.error('[Uploads] Failed to create uploads directory:', err.message);
 }
 
 // CORS headers for Vercel deployment
@@ -1921,37 +1928,6 @@ if (usedModel !== model || keyIndex !== 0) {
     }
 });
 
-// Schedule cleanup of old chat sessions (prevent memory leak)
-setInterval(() => {
-    const now = Date.now();
-    let cleaned = 0;
-    for (const [id, session] of chatSessions) {
-        if (now - session.createdAt > 4 * 60 * 60 * 1000) { // 4 hours
-            chatSessions.delete(id);
-            cleaned++;
-        }
-    }
-    if (cleaned > 0) console.log(`[Cleanup] Removed ${cleaned} expired sessions. Active: ${chatSessions.size}`);
-}, 30 * 60 * 1000); // every 30 minutes
-
-// Cleanup old conversation memory entries
-setInterval(() => {
-    const now = Date.now();
-    let cleaned = 0;
-    for (const [sessionId, memoryObj] of CONVERSATION_MEMORY) {
-        for (const [key, entry] of Object.entries(memoryObj)) {
-            if (now - entry.timestamp > MEMORY_MAX_AGE) {
-                delete memoryObj[key];
-                cleaned++;
-            }
-        }
-        if (Object.keys(memoryObj).length === 0) {
-            CONVERSATION_MEMORY.delete(sessionId);
-        }
-    }
-    if (cleaned > 0) console.log(`[Memory Cleanup] Removed ${cleaned} expired memory entries. Active sessions: ${CONVERSATION_MEMORY.size}`);
-}, 15 * 60 * 1000); // every 15 minutes
-
 // Multer error handler — must be after routes
 app.use((err, req, res, next) => {
     if (res.headersSent) return next(err);
@@ -1971,5 +1947,44 @@ app.use((err, req, res, next) => {
     next(err);
 });
 
-// Use the graceful startServer with retry logic instead of direct app.listen
-startServer(app, port);
+// On Vercel: export the Express app as a serverless function handler
+// Vercel imports this and calls it for each incoming request.
+// For local dev: startServer() is called below (not on Vercel).
+export default app;
+
+// Only run the local server when NOT on Vercel
+// Vercel handles HTTP serving automatically — we must NOT call app.listen()
+if (!process.env.VERCEL && !process.env.VERCEL_ENV) {
+    // Schedule cleanup of old chat sessions (prevent memory leak)
+    setInterval(() => {
+        const now = Date.now();
+        let cleaned = 0;
+        for (const [id, session] of chatSessions) {
+            if (now - session.createdAt > 4 * 60 * 60 * 1000) { // 4 hours
+                chatSessions.delete(id);
+                cleaned++;
+            }
+        }
+        if (cleaned > 0) console.log(`[Cleanup] Removed ${cleaned} expired sessions. Active: ${chatSessions.size}`);
+    }, 30 * 60 * 1000); // every 30 minutes
+
+    // Cleanup old conversation memory entries
+    setInterval(() => {
+        const now = Date.now();
+        let cleaned = 0;
+        for (const [sessionId, memoryObj] of CONVERSATION_MEMORY) {
+            for (const [key, entry] of Object.entries(memoryObj)) {
+                if (now - entry.timestamp > MEMORY_MAX_AGE) {
+                    delete memoryObj[key];
+                    cleaned++;
+                }
+            }
+            if (Object.keys(memoryObj).length === 0) {
+                CONVERSATION_MEMORY.delete(sessionId);
+            }
+        }
+        if (cleaned > 0) console.log(`[Memory Cleanup] Removed ${cleaned} expired memory entries. Active sessions: ${CONVERSATION_MEMORY.size}`);
+    }, 15 * 60 * 1000); // every 15 minutes
+
+    startServer(app, port);
+}
