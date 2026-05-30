@@ -1,0 +1,1363 @@
+// ============================================================
+// OXY AI — Full Multimodal Chat App
+// ============================================================
+
+// === DOM ELEMENTS ===
+const messageInput = document.getElementById('message-input');
+const sendBtn = document.getElementById('send-btn');
+const messagesWrapper = document.getElementById('messages-wrapper');
+const welcomeScreen = document.getElementById('welcome-screen');
+const typingIndicator = document.getElementById('typing-indicator');
+const chatContainer = document.getElementById('chat-container');
+const mobileMenuBtn = document.getElementById('mobile-menu-btn');
+const sidebar = document.querySelector('.sidebar');
+const stopBtn = document.getElementById('stop-btn');
+const regenBtn = document.getElementById('regen-btn');
+const chatList = document.getElementById('chat-list');
+const clearChatBtn = document.getElementById('clear-chat-btn');
+const settingsBtn = document.getElementById('settings-btn');
+const shareBtn = document.getElementById('share-btn');
+
+// === LOCATION SERVICE ===
+let userLocation = localStorage.getItem('oxy_user_location') || null;
+
+async function fetchUserLocation() {
+    try {
+        const response = await fetch('https://ipapi.co/json/');
+        const data = await response.json();
+        const location = `${data.city || ''}, ${data.region || ''} ${data.country_name || ''}`.replace(/,\s*$/, '').trim();
+        return location || null;
+    } catch (err) {
+        console.warn('Could not fetch location:', err);
+        return null;
+    }
+}
+
+function initLocation() {
+    fetchUserLocation().then(location => {
+        if (location) {
+            userLocation = location;
+            localStorage.setItem('oxy_user_location', location);
+            if (OXYWidgetRenderer && OXYWidgetRenderer.setUserLocation) {
+                OXYWidgetRenderer.setUserLocation(location);
+            }
+        }
+    });
+}
+
+// Attachment elements
+const attachBtn = document.getElementById('attach-btn');
+const fileInput = document.getElementById('file-input');
+const attachMenu = document.getElementById('attach-menu');
+const attachMenuContainer = document.getElementById('attach-menu-container');
+const menuAddFiles = document.getElementById('menu-add-files');
+const menuScreenshot = document.getElementById('menu-screenshot');
+const menuCamera = document.getElementById('menu-camera');
+const menuRecent = document.getElementById('menu-recent');
+const filePreviewStrip = document.getElementById('file-preview-strip');
+const dropZoneOverlay = document.getElementById('drop-zone-overlay');
+const inputWrapper = document.getElementById('input-wrapper');
+
+// Camera elements
+const cameraModal = document.getElementById('camera-modal');
+const cameraPreview = document.getElementById('camera-preview');
+const cameraCanvas = document.getElementById('camera-canvas');
+const cameraCaptureBtn = document.getElementById('camera-capture-btn');
+const cameraFlipBtn = document.getElementById('camera-flip-btn');
+const cameraCloseBtn = document.getElementById('camera-close-btn');
+
+// Recent files modal
+const recentFilesModal = document.getElementById('recent-files-modal');
+const recentFilesBody = document.getElementById('recent-files-body');
+const recentFilesCloseBtn = document.getElementById('recent-files-close-btn');
+
+// Lightbox Elements
+const lightboxModal = document.getElementById('lightbox-modal');
+const lightboxImg = document.getElementById('lightbox-img');
+const lightboxClose = document.getElementById('lightbox-close');
+const lightboxDownload = document.getElementById('lightbox-download');
+const lightboxCounter = document.getElementById('lightbox-counter');
+
+// Toast
+const toastContainer = document.getElementById('toast-container');
+
+// Lightbox state
+let lightboxImages = [];
+let lightboxCurrentIndex = 0;
+
+// Modal Elements
+const settingsModal = document.getElementById('settings-modal');
+const closeSettingsBtn = document.getElementById('close-settings-btn');
+const saveSettingsBtn = document.getElementById('save-settings-btn');
+const userNameInput = document.getElementById('user-name-input');
+const userNameDisplay = document.querySelector('.user-name');
+const genderRadios = document.querySelectorAll('input[name="gender"]');
+
+// === STATE ===
+let currentSessionId = '';
+let abortController = null;
+let isGenerating = false;
+let isUploading = false;
+let currentChatHistory = [];
+let userName = localStorage.getItem('oxy_user_name') || 'Ismail Souilkte';
+let userGender = localStorage.getItem('oxy_user_gender') || 'Prefer not to say';
+let pendingFiles = []; // { id, file, preview, name, size, type }
+let cameraStream = null;
+let cameraFacingMode = 'user';
+
+// File ID counter
+let fileIdCounter = 0;
+
+// === RECENT FILES (stored in localStorage) ===
+function getRecentFiles() {
+    try { return JSON.parse(localStorage.getItem('oxy_recent_files') || '[]'); } catch { return []; }
+}
+
+function addRecentFile(fileInfo) {
+    const recent = getRecentFiles();
+    // Avoid duplicates by name
+    const existing = recent.findIndex(r => r.name === fileInfo.name);
+    if (existing !== -1) recent.splice(existing, 1);
+    recent.unshift({
+        name: fileInfo.name,
+        type: fileInfo.type,
+        size: fileInfo.size,
+        addedAt: Date.now()
+    });
+    // Keep last 20
+    if (recent.length > 20) recent.pop();
+    localStorage.setItem('oxy_recent_files', JSON.stringify(recent));
+}
+
+// === TOAST NOTIFICATION ===
+function showToast(message, type = 'info', duration = 3000) {
+    const toast = document.createElement('div');
+    toast.className = `toast toast-${type}`;
+    const icons = { info: 'fa-circle-info', success: 'fa-circle-check', error: 'fa-circle-xmark', warning: 'fa-triangle-exclamation' };
+    toast.innerHTML = `<i class="fa-solid ${icons[type] || icons.info}"></i> <span>${message}</span>`;
+    toastContainer.appendChild(toast);
+    setTimeout(() => {
+        toast.classList.add('toast-hide');
+        setTimeout(() => toast.remove(), 300);
+    }, duration);
+}
+
+// === SETTINGS ===
+settingsBtn.addEventListener('click', () => {
+    userNameInput.value = userName;
+    // Set gender radio to match saved value
+    genderRadios.forEach(radio => {
+        if (radio.value === userGender) {
+            radio.checked = true;
+        }
+    });
+    settingsModal.style.display = 'flex';
+});
+
+closeSettingsBtn.addEventListener('click', () => {
+    settingsModal.style.display = 'none';
+});
+
+saveSettingsBtn.addEventListener('click', () => {
+    const newName = userNameInput.value.trim();
+    if (newName) {
+        userName = newName;
+        localStorage.setItem('oxy_user_name', userName);
+        updateUserUI();
+    }
+    // Save gender
+    genderRadios.forEach(radio => {
+        if (radio.checked) {
+            userGender = radio.value;
+            localStorage.setItem('oxy_user_gender', userGender);
+        }
+    });
+    settingsModal.style.display = 'none';
+});
+
+function updateUserUI() {
+    userNameDisplay.textContent = userName;
+}
+
+shareBtn.addEventListener('click', () => {
+    if (!currentSessionId) return;
+    const shareLink = `${window.location.origin}/share/${currentSessionId}`;
+    navigator.clipboard.writeText(shareLink).then(() => {
+        showToast('Link copied to clipboard!', 'success');
+    }).catch(() => {
+        showToast(`Share link: ${shareLink}`, 'info');
+    });
+});
+
+// === MARKED CONFIGURATION ===
+marked.setOptions({
+    highlight: function(code, lang) {
+        const language = hljs.getLanguage(lang) ? lang : 'plaintext';
+        return hljs.highlight(code, { language }).value;
+    },
+    langPrefix: 'hljs language-',
+    breaks: true
+});
+
+// === SESSION MANAGEMENT ===
+function getSessions() {
+    return JSON.parse(localStorage.getItem('oxy_sessions') || '{}');
+}
+
+function saveSession() {
+    if (currentChatHistory.length === 0) return;
+    const sessions = getSessions();
+    const title = currentChatHistory[0].text?.substring(0, 30) + '...' || 'Chat';
+    sessions[currentSessionId] = {
+        title: title,
+        history: currentChatHistory,
+        updatedAt: Date.now()
+    };
+    localStorage.setItem('oxy_sessions', JSON.stringify(sessions));
+    loadSessionsList();
+}
+
+function loadSessionsList() {
+    const sessions = getSessions();
+    chatList.innerHTML = '';
+    Object.keys(sessions)
+        .sort((a, b) => sessions[b].updatedAt - sessions[a].updatedAt)
+        .forEach(id => {
+            const div = document.createElement('div');
+            div.className = `chat-item ${id === currentSessionId ? 'active' : ''}`;
+            const titleSpan = document.createElement('span');
+            titleSpan.className = 'chat-item-title';
+            titleSpan.textContent = sessions[id].title;
+            titleSpan.onclick = () => loadSession(id);
+            const actionsDiv = document.createElement('div');
+            actionsDiv.className = 'chat-item-actions';
+            const renameBtn = document.createElement('i');
+            renameBtn.className = 'fa-solid fa-pen chat-action-btn';
+            renameBtn.title = 'Rename Chat';
+            renameBtn.onclick = (e) => { e.stopPropagation(); renameSession(id); };
+            const deleteBtn = document.createElement('i');
+            deleteBtn.className = 'fa-solid fa-trash chat-action-btn';
+            deleteBtn.title = 'Delete Chat';
+            deleteBtn.onclick = (e) => { e.stopPropagation(); deleteSession(id); };
+            actionsDiv.appendChild(renameBtn);
+            actionsDiv.appendChild(deleteBtn);
+            div.appendChild(titleSpan);
+            div.appendChild(actionsDiv);
+            chatList.appendChild(div);
+        });
+}
+
+function deleteSession(id) {
+    if (confirm("Are you sure you want to delete this conversation?")) {
+        const sessions = getSessions();
+        delete sessions[id];
+        localStorage.setItem('oxy_sessions', JSON.stringify(sessions));
+        if (id === currentSessionId) createNewSession();
+        else loadSessionsList();
+    }
+}
+
+function renameSession(id) {
+    const sessions = getSessions();
+    const newTitle = prompt("Enter new name for this conversation:", sessions[id].title);
+    if (newTitle && newTitle.trim() !== '') {
+        sessions[id].title = newTitle.trim();
+        localStorage.setItem('oxy_sessions', JSON.stringify(sessions));
+        loadSessionsList();
+    }
+}
+
+function loadSession(id) {
+    const sessions = getSessions();
+    if (sessions[id]) {
+        currentSessionId = id;
+        currentChatHistory = sessions[id].history;
+        renderHistory();
+        loadSessionsList();
+        regenBtn.style.display = currentChatHistory.length > 0 && currentChatHistory[currentChatHistory.length-1]?.sender === 'bot' ? 'flex' : 'none';
+        if (window.innerWidth <= 768) closeSidebar();
+    }
+}
+
+function createNewSession() {
+    currentSessionId = 'sess_' + Math.random().toString(36).substr(2, 9);
+    currentChatHistory = [];
+    messagesWrapper.innerHTML = '';
+    welcomeScreen.style.display = 'flex';
+    regenBtn.style.display = 'none';
+    pendingFiles = [];
+    updateFilePreviewStrip();
+    loadSessionsList();
+}
+
+document.getElementById('new-chat-btn').addEventListener('click', createNewSession);
+
+clearChatBtn.addEventListener('click', () => {
+    if (confirm("Are you sure you want to clear this chat?")) {
+        const sessions = getSessions();
+        delete sessions[currentSessionId];
+        localStorage.setItem('oxy_sessions', JSON.stringify(sessions));
+        createNewSession();
+    }
+});
+
+// === SIDEBAR ===
+const sidebarOverlay = document.getElementById('sidebar-overlay');
+
+function openSidebar() {
+    if (window.innerWidth <= 768) {
+        sidebar.classList.add('open');
+        sidebarOverlay.classList.add('active');
+    } else {
+        sidebar.classList.remove('closed');
+    }
+}
+function closeSidebar() {
+    if (window.innerWidth <= 768) {
+        sidebar.classList.remove('open');
+        sidebarOverlay.classList.remove('active');
+    } else {
+        sidebar.classList.add('closed');
+    }
+}
+function isSidebarOpen() {
+    if (window.innerWidth <= 768) return sidebar.classList.contains('open');
+    return !sidebar.classList.contains('closed');
+}
+
+const sidebarToggleBtn = document.getElementById('sidebar-toggle-btn');
+sidebarToggleBtn.addEventListener('click', () => { isSidebarOpen() ? closeSidebar() : openSidebar(); });
+
+if (mobileMenuBtn) {
+    mobileMenuBtn.addEventListener('click', () => { isSidebarOpen() ? closeSidebar() : openSidebar(); });
+}
+
+document.addEventListener('click', (e) => {
+    if (!isSidebarOpen()) return;
+    if (sidebarToggleBtn?.contains(e.target)) return;
+    if (mobileMenuBtn?.contains(e.target)) return;
+    if (sidebar.contains(e.target)) return;
+    if (sidebarOverlay?.contains(e.target)) return;
+    closeSidebar();
+});
+
+sidebarOverlay?.addEventListener('click', closeSidebar);
+
+// === ATTACHMENT MENU ===
+let attachMenuOpen = false;
+
+function toggleAttachMenu(e) {
+    if (e) e.stopPropagation();
+    attachMenuOpen = !attachMenuOpen;
+    attachMenu.classList.toggle('visible', attachMenuOpen);
+}
+
+function closeAttachMenu() {
+    attachMenuOpen = false;
+    attachMenu.classList.remove('visible');
+}
+
+attachBtn.addEventListener('click', toggleAttachMenu);
+
+document.addEventListener('click', (e) => {
+    if (attachMenuOpen && !attachMenuContainer.contains(e.target)) {
+        closeAttachMenu();
+    }
+});
+
+// Escape key closes menus and modals
+document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+        if (attachMenuOpen) { closeAttachMenu(); return; }
+        if (cameraModal.style.display !== 'none') { closeCamera(); return; }
+        if (recentFilesModal.style.display !== 'none') { closeRecentFilesModal(); return; }
+        if (settingsModal.style.display !== 'none') { settingsModal.style.display = 'none'; return; }
+        if (lightboxModal.classList.contains('open')) { closeLightbox(); return; }
+        if (isSidebarOpen()) closeSidebar();
+    }
+});
+
+// Menu items
+menuAddFiles.addEventListener('click', () => {
+    closeAttachMenu();
+    fileInput.click();
+});
+
+menuScreenshot.addEventListener('click', () => {
+    closeAttachMenu();
+    captureScreenshot();
+});
+
+menuCamera.addEventListener('click', () => {
+    closeAttachMenu();
+    openCamera();
+});
+
+menuRecent.addEventListener('click', () => {
+    closeAttachMenu();
+    openRecentFilesModal();
+});
+
+// === FILE INPUT HANDLER ===
+fileInput.addEventListener('change', (e) => {
+    if (e.target.files.length > 0) {
+        addFilesToPending(e.target.files);
+        e.target.value = '';
+    }
+});
+
+// === FILE MANAGEMENT ===
+function addFilesToPending(fileList) {
+    const maxSize = 50 * 1024 * 1024; // 50MB
+    const maxTotal = 10;
+    const errors = [];
+
+    for (const file of fileList) {
+        if (pendingFiles.length >= maxTotal) {
+            errors.push(`Maximum ${maxTotal} files allowed`);
+            break;
+        }
+        if (file.size > maxSize) {
+            errors.push(`"${file.name}" is too large (max 50MB)`);
+            continue;
+        }
+        if (file.size === 0) {
+            errors.push(`"${file.name}" is empty`);
+            continue;
+        }
+        const id = ++fileIdCounter;
+        const preview = generatePreview(file);
+        pendingFiles.push({ id, file, preview, name: file.name, size: file.size, type: file.type });
+    }
+
+    if (errors.length > 0) showToast(errors[0], 'warning');
+    updateFilePreviewStrip();
+    updateSendButton();
+}
+
+function generatePreview(file) {
+    if (file.type.startsWith('image/')) {
+        return URL.createObjectURL(file);
+    }
+    if (file.type.startsWith('video/')) {
+        return URL.createObjectURL(file);
+    }
+    return null;
+}
+
+function getFileIcon(type, name) {
+    const ext = name?.split('.').pop()?.toLowerCase();
+    if (type?.startsWith('image/')) return 'fa-file-image';
+    if (type?.startsWith('video/')) return 'fa-file-video';
+    if (type === 'application/pdf') return 'fa-file-pdf';
+    if (type?.includes('zip') || ext === 'zip') return 'fa-file-zipper';
+    if (type?.includes('word') || ext === 'docx') return 'fa-file-word';
+    if (type === 'text/csv' || ext === 'csv') return 'fa-file-csv';
+    if (type === 'application/json' || ext === 'json') return 'fa-file-code';
+    if (['js','ts','html','css','py','java','cpp','c','jsx','tsx'].includes(ext)) return 'fa-file-code';
+    if (type?.startsWith('text/') || ['txt','md'].includes(ext)) return 'fa-file-lines';
+    return 'fa-file';
+}
+
+function getFileColor(type, name) {
+    const ext = name?.split('.').pop()?.toLowerCase();
+    if (type?.startsWith('image/')) return '#a855f7';
+    if (type?.startsWith('video/')) return '#f97316';
+    if (type === 'application/pdf') return '#ef4444';
+    if (type?.includes('zip') || ext === 'zip') return '#eab308';
+    if (['js','ts','html','css','py','java','cpp','c'].includes(ext)) return '#22c55e';
+    if (type?.startsWith('text/') || ['txt','md'].includes(ext)) return '#3b82f6';
+    return '#6b7280';
+}
+
+function formatFileSize(bytes) {
+    if (bytes < 1024) return bytes + ' B';
+    if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+    return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function removePendingFile(id) {
+    const file = pendingFiles.find(f => f.id === id);
+    if (file?.preview) URL.revokeObjectURL(file.preview);
+    pendingFiles = pendingFiles.filter(f => f.id !== id);
+    updateFilePreviewStrip();
+    updateSendButton();
+}
+
+function clearPendingFiles() {
+    pendingFiles.forEach(f => { if (f.preview) URL.revokeObjectURL(f.preview); });
+    pendingFiles = [];
+    updateFilePreviewStrip();
+    updateSendButton();
+}
+
+function updateFilePreviewStrip() {
+    if (pendingFiles.length === 0) {
+        filePreviewStrip.style.display = 'none';
+        filePreviewStrip.innerHTML = '';
+        return;
+    }
+    filePreviewStrip.style.display = 'flex';
+    filePreviewStrip.innerHTML = pendingFiles.map(f => {
+        const icon = getFileIcon(f.type, f.name);
+        const color = getFileColor(f.type, f.name);
+        const size = formatFileSize(f.size);
+        const thumbHtml = f.preview
+            ? f.type.startsWith('video/')
+                ? `<video src="${f.preview}" class="preview-thumb" muted preload="metadata"></video>`
+                : `<img src="${f.preview}" class="preview-thumb" alt="" loading="lazy">`
+            : `<div class="preview-icon-bg" style="background:${color}20;color:${color}"><i class="fa-solid ${icon}"></i></div>`;
+        return `
+            <div class="preview-item" data-id="${f.id}">
+                <button class="preview-remove" onclick="removePendingFile(${f.id})">
+                    <i class="fa-solid fa-xmark"></i>
+                </button>
+                <div class="preview-thumb-wrap">
+                    ${thumbHtml}
+                </div>
+                <div class="preview-info">
+                    <span class="preview-name">${f.name.length > 20 ? f.name.substring(0, 18) + '…' : f.name}</span>
+                    <span class="preview-size">${size}</span>
+                </div>
+            </div>
+        `;
+    }).join('');
+}
+
+function setUploadingState(uploading) {
+    isUploading = uploading;
+    if (inputWrapper) inputWrapper.classList.toggle('uploading', uploading);
+    // Add shimmer to preview items
+    document.querySelectorAll('.preview-item').forEach(item => {
+        item.classList.toggle('uploading', uploading);
+    });
+}
+
+function updateSendButton() {
+    const hasText = messageInput.value.trim().length > 0;
+    const hasFiles = pendingFiles.length > 0;
+    sendBtn.disabled = !(hasText || hasFiles) || isUploading;
+}
+
+// === DRAG & DROP ===
+let dragCounter = 0;
+
+chatContainer.addEventListener('dragenter', (e) => {
+    e.preventDefault();
+    dragCounter++;
+    dropZoneOverlay.classList.add('visible');
+});
+
+chatContainer.addEventListener('dragover', (e) => {
+    e.preventDefault();
+});
+
+chatContainer.addEventListener('dragleave', (e) => {
+    e.preventDefault();
+    dragCounter--;
+    if (dragCounter <= 0) {
+        dragCounter = 0;
+        dropZoneOverlay.classList.remove('visible');
+    }
+});
+
+chatContainer.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dragCounter = 0;
+    dropZoneOverlay.classList.remove('visible');
+    if (e.dataTransfer.files.length > 0) {
+        addFilesToPending(e.dataTransfer.files);
+    }
+});
+
+// Also support drop on the entire main area
+document.querySelector('.chat-main')?.addEventListener('dragover', (e) => e.preventDefault());
+document.querySelector('.chat-main')?.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dragCounter = 0;
+    dropZoneOverlay.classList.remove('visible');
+    if (e.dataTransfer.files.length > 0) {
+        addFilesToPending(e.dataTransfer.files);
+    }
+});
+
+// === CLIPBOARD PASTE (Global — Ctrl+V from anywhere) ===
+document.addEventListener('paste', async (e) => {
+    // Don't intercept if pasting text into textarea (no images in clipboard)
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    const imageItems = [];
+    for (const item of items) {
+        if (item.type.startsWith('image/')) {
+            imageItems.push(item);
+        }
+    }
+
+    if (imageItems.length > 0) {
+        e.preventDefault();
+        const files = await Promise.all(imageItems.map(async (item) => {
+            const blob = item.getAsFile();
+            if (blob) {
+                return new File([blob], `pasted-image-${Date.now()}.png`, { type: blob.type });
+            }
+            return null;
+        }));
+        const validFiles = files.filter(Boolean);
+        if (validFiles.length > 0) {
+            addFilesToPending(validFiles);
+            showToast('Image pasted from clipboard', 'success');
+        }
+    }
+});
+
+// === SCREENSHOT CAPTURE ===
+async function captureScreenshot() {
+    try {
+        const stream = await navigator.mediaDevices.getDisplayMedia({ preferCurrentTab: true });
+        const track = stream.getVideoTracks()[0];
+        const imgCapture = new ImageCapture(track);
+        const bitmap = await imgCapture.grabFrame();
+        track.stop();
+
+        const canvas = document.createElement('canvas');
+        canvas.width = bitmap.width;
+        canvas.height = bitmap.height;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(bitmap, 0, 0);
+        
+        const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
+        if (blob) {
+            const file = new File([blob], `screenshot-${Date.now()}.png`, { type: 'image/png' });
+            addFilesToPending([file]);
+            showToast('Screenshot captured!', 'success');
+        }
+    } catch (err) {
+        if (err.name !== 'NotAllowedError' && err.name !== 'AbortError') {
+            showToast('Screenshot failed. Try pasting with Ctrl+V instead.', 'error');
+        }
+    }
+}
+
+// === CAMERA CAPTURE ===
+async function openCamera() {
+    try {
+        cameraModal.style.display = 'flex';
+        cameraStream = await navigator.mediaDevices.getUserMedia({
+            video: { facingMode: cameraFacingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
+            audio: false
+        });
+        cameraPreview.srcObject = cameraStream;
+    } catch (err) {
+        cameraModal.style.display = 'none';
+        showToast('Camera access denied. Please allow camera permissions.', 'error');
+    }
+}
+
+function closeCamera() {
+    if (cameraStream) {
+        cameraStream.getTracks().forEach(t => t.stop());
+        cameraStream = null;
+    }
+    cameraPreview.srcObject = null;
+    cameraModal.style.display = 'none';
+}
+
+cameraCloseBtn.addEventListener('click', closeCamera);
+
+cameraFlipBtn.addEventListener('click', () => {
+    cameraFacingMode = cameraFacingMode === 'user' ? 'environment' : 'user';
+    if (cameraStream) {
+        cameraStream.getTracks().forEach(t => t.stop());
+    }
+    openCamera();
+});
+
+cameraCaptureBtn.addEventListener('click', () => {
+    const canvas = cameraCanvas;
+    canvas.width = cameraPreview.videoWidth;
+    canvas.height = cameraPreview.videoHeight;
+    const ctx = canvas.getContext('2d');
+    // Flip horizontally if using front camera
+    if (cameraFacingMode === 'user') {
+        ctx.translate(canvas.width, 0);
+        ctx.scale(-1, 1);
+    }
+    ctx.drawImage(cameraPreview, 0, 0);
+    canvas.toBlob((blob) => {
+        if (blob) {
+            const file = new File([blob], `camera-${Date.now()}.jpg`, { type: 'image/jpeg' });
+            addFilesToPending([file]);
+            showToast('Photo captured!', 'success');
+        }
+        closeCamera();
+    }, 'image/jpeg', 0.92);
+});
+
+// === RECENT FILES MODAL ===
+function openRecentFilesModal() {
+    const recent = getRecentFiles();
+    recentFilesBody.innerHTML = '';
+
+    if (recent.length === 0) {
+        recentFilesBody.innerHTML = `
+            <div class="recent-files-empty">
+                <i class="fa-solid fa-folder-open"></i>
+                <span>No recent files yet</span>
+            </div>
+        `;
+    } else {
+        recent.forEach((file, idx) => {
+            const icon = getFileIcon(file.type, file.name);
+            const color = getFileColor(file.type, file.name);
+            const size = formatFileSize(file.size);
+            const timeAgo = getTimeAgo(file.addedAt);
+
+            const item = document.createElement('div');
+            item.className = 'recent-file-item';
+            item.innerHTML = `
+                <div class="recent-file-icon" style="background:${color}18;color:${color}">
+                    <i class="fa-solid ${icon}"></i>
+                </div>
+                <div class="recent-file-info">
+                    <div class="recent-file-name">${file.name}</div>
+                    <div class="recent-file-meta">${size} · ${timeAgo}</div>
+                </div>
+            `;
+            item.addEventListener('click', () => {
+                closeRecentFilesModal();
+                // Trigger file picker so user can re-select the file
+                fileInput.click();
+                showToast(`Select "${file.name}" from your files`, 'info');
+            });
+            recentFilesBody.appendChild(item);
+        });
+    }
+
+    recentFilesModal.style.display = 'flex';
+}
+
+function closeRecentFilesModal() {
+    recentFilesModal.style.display = 'none';
+}
+
+recentFilesCloseBtn.addEventListener('click', closeRecentFilesModal);
+
+// Click outside to close recent files modal
+recentFilesModal.addEventListener('click', (e) => {
+    if (e.target === recentFilesModal) closeRecentFilesModal();
+});
+
+function getTimeAgo(timestamp) {
+    const diff = Date.now() - timestamp;
+    const mins = Math.floor(diff / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hrs = Math.floor(mins / 60);
+    if (hrs < 24) return `${hrs}h ago`;
+    const days = Math.floor(hrs / 24);
+    if (days === 1) return 'yesterday';
+    return `${days}d ago`;
+}
+
+// === LIGHTBOX (ChatGPT-style image preview) ===
+function openLightbox(images, startIndex = 0) {
+    if (!images || images.length === 0) return;
+    lightboxImages = images;
+    lightboxCurrentIndex = startIndex;
+    showLightboxImage();
+    lightboxModal.classList.add('open');
+    document.body.style.overflow = 'hidden';
+}
+
+function showLightboxImage() {
+    const img = lightboxImages[lightboxCurrentIndex];
+    if (!img) return;
+    const src = img.url || img.preview || img.src;
+    lightboxImg.src = src;
+    lightboxImg.alt = img.name || 'Image';
+    
+    if (lightboxImages.length > 1) {
+        lightboxCounter.textContent = `${lightboxCurrentIndex + 1} / ${lightboxImages.length}`;
+        lightboxCounter.style.display = 'block';
+    } else {
+        lightboxCounter.style.display = 'none';
+    }
+    
+    lightboxDownload.onclick = () => {
+        const a = document.createElement('a');
+        a.href = src;
+        a.download = img.name || 'image';
+        a.click();
+    };
+}
+
+function closeLightbox() {
+    lightboxModal.classList.remove('open');
+    document.body.style.overflow = '';
+}
+
+// Lightbox keyboard navigation on global listener (already added above)
+// Click handlers
+lightboxClose.addEventListener('click', closeLightbox);
+lightboxModal.addEventListener('click', (e) => {
+    if (e.target === lightboxModal) closeLightbox();
+});
+
+// Also listen for arrow keys for lightbox on the global keydown
+document.addEventListener('keydown', (e) => {
+    if (!lightboxModal.classList.contains('open')) return;
+    if (e.key === 'ArrowLeft' && lightboxImages.length > 1) {
+        e.preventDefault();
+        lightboxCurrentIndex = (lightboxCurrentIndex - 1 + lightboxImages.length) % lightboxImages.length;
+        showLightboxImage();
+    }
+    if (e.key === 'ArrowRight' && lightboxImages.length > 1) {
+        e.preventDefault();
+        lightboxCurrentIndex = (lightboxCurrentIndex + 1) % lightboxImages.length;
+        showLightboxImage();
+    }
+});
+
+// === ChatGPT-style file attachments builder ===
+function buildFileAttachments(files) {
+    const attachGrid = document.createElement('div');
+    attachGrid.className = 'msg-attachments-grid';
+    if (files.length > 1) attachGrid.classList.add('multiple-attachments');
+
+    const imageFiles = files.filter(f => f.type?.startsWith('image/'));
+
+    files.forEach((f) => {
+        let attachEl;
+
+        if (f.type?.startsWith('image/') && (f.url || f.preview)) {
+            attachEl = document.createElement('img');
+            attachEl.className = 'msg-attach-img';
+            if (imageFiles.length >= 3) attachEl.classList.add('small-multi');
+            attachEl.src = f.url || f.preview;
+            attachEl.alt = f.name;
+            attachEl.loading = 'lazy';
+            attachEl.style.cursor = 'pointer';
+            const imgIndex = imageFiles.indexOf(f);
+            attachEl.addEventListener('click', (e) => {
+                e.stopPropagation();
+                openLightbox(imageFiles, Math.max(0, imgIndex));
+            });
+
+        } else if (f.type?.startsWith('video/') && (f.url || f.preview)) {
+            attachEl = document.createElement('video');
+            attachEl.className = 'msg-attach-video';
+            attachEl.src = f.url || f.preview;
+            attachEl.controls = true;
+            attachEl.preload = 'metadata';
+
+        } else {
+            attachEl = document.createElement('div');
+            attachEl.className = 'msg-attach-file-card';
+            
+            const icon = getFileIcon(f.type, f.name);
+            const color = getFileColor(f.type, f.name);
+            const size = formatFileSize(f.size);
+            
+            let actionsHtml = '';
+            if (f.url) {
+                if (f.type === 'application/pdf') {
+                    actionsHtml += `<button class="file-card-btn preview-btn" onclick="event.stopPropagation();window.open('${f.url}','_blank')" title="Preview"><i class="fa-solid fa-eye"></i></button>`;
+                }
+                actionsHtml += `<button class="file-card-btn" onclick="event.stopPropagation();window.open('${f.url}','_blank')" title="Download"><i class="fa-solid fa-download"></i></button>`;
+            }
+            
+            attachEl.innerHTML = `
+                <div class="file-card-icon" style="background:${color}20;color:${color}">
+                    <i class="fa-solid ${icon}"></i>
+                </div>
+                <div class="file-card-info">
+                    <span class="file-card-name">${f.name}</span>
+                    <span class="file-card-meta">${size}</span>
+                </div>
+                <div class="file-card-actions">${actionsHtml}</div>
+            `;
+            
+            if (f.url) {
+                attachEl.style.cursor = 'pointer';
+                attachEl.addEventListener('click', () => window.open(f.url, '_blank'));
+            }
+        }
+
+        if (attachEl) {
+            const wrapper = document.createElement('div');
+            wrapper.className = 'msg-attachment';
+            wrapper.appendChild(attachEl);
+            attachGrid.appendChild(wrapper);
+        }
+    });
+
+    return attachGrid;
+}
+
+function appendMessage(text, sender, finalRender = true, files = null) {
+    const msgDiv = document.createElement('div');
+    msgDiv.className = `message ${sender}`;
+    msgDiv.dataset.messageText = text;
+
+    const avatar = document.createElement('div');
+    avatar.className = 'message-avatar';
+    if (sender === 'user') {
+        const initials = userName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+        avatar.textContent = initials;
+    } else {
+        avatar.innerHTML = '<div class="logo-ring msg-ring"><div class="logo-ring-glow"></div></div>';
+    }
+
+    const content = document.createElement('div');
+    content.className = 'message-content';
+
+    // ChatGPT-style file attachments
+    if (files && files.length > 0) {
+        const attachGrid = buildFileAttachments(files);
+        content.appendChild(attachGrid);
+    }
+
+    if (sender === 'user') {
+        if (text && finalRender) {
+            const textEl = document.createElement('div');
+            textEl.className = 'msg-text-content';
+            textEl.textContent = text;
+            content.appendChild(textEl);
+        }
+    } else {
+        if (finalRender && text) {
+            // Check if the response is a structured widget (JSON)
+            const widgetResult = OXYWidgetRenderer.detectAndRender(text);
+            if (widgetResult) {
+                const widgetWrap = document.createElement('div');
+                widgetWrap.className = 'oxy-widget-container';
+                widgetWrap.innerHTML = widgetResult.html;
+                content.appendChild(widgetWrap);
+            } else {
+                const textWrap = document.createElement('div');
+                const rawHtml = marked.parse(text);
+                textWrap.innerHTML = DOMPurify.sanitize(rawHtml);
+                content.appendChild(textWrap);
+                formatCodeBlocks(content);
+            }
+        }
+    }
+
+    const contentWrapper = document.createElement('div');
+    contentWrapper.className = 'message-content-wrapper';
+    contentWrapper.style.position = 'relative';
+    contentWrapper.style.display = 'flex';
+    contentWrapper.style.flexDirection = 'column';
+    contentWrapper.style.alignItems = sender === 'user' ? 'flex-end' : 'flex-start';
+    contentWrapper.style.flex = '1';
+    contentWrapper.style.minWidth = '0';
+    
+    contentWrapper.appendChild(content);
+
+    // Add message actions (Copy/Edit) for user messages
+    if (sender === 'user') {
+        const actionsDiv = document.createElement('div');
+        actionsDiv.className = 'message-actions';
+        actionsDiv.innerHTML = `
+            <button class="msg-action-btn" onclick="copyMessage('${text.replace(/'/g, '\\x27')}')" title="Copy">
+                <i class="fa-regular fa-copy"></i>
+            </button>
+            <button class="msg-action-btn" onclick="editMessage(this)" title="Edit">
+                <i class="fa-solid fa-pen"></i>
+            </button>
+        `;
+        contentWrapper.appendChild(actionsDiv);
+    }
+
+    msgDiv.appendChild(avatar);
+    msgDiv.appendChild(contentWrapper);
+
+    messagesWrapper.appendChild(msgDiv);
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+    return msgDiv;
+}
+
+// === SEND MESSAGE (with files) ===
+function handleSend() {
+    const text = messageInput.value.trim();
+    if ((!text && pendingFiles.length === 0) || isGenerating || isUploading) return;
+
+    messageInput.value = '';
+    messageInput.style.height = 'auto';
+    sendBtn.disabled = true;
+
+    // Build file metadata for history (no raw [filename] text)
+    const filesForHistory = pendingFiles.map(f => {
+        addRecentFile({ name: f.name, type: f.type, size: f.size });
+        return { name: f.name, type: f.type, size: f.size, preview: f.preview };
+    });
+
+    // Store clean text only — no [filename] prefixes
+    currentChatHistory.push({
+        text: text,
+        sender: 'user',
+        files: filesForHistory
+    });
+
+    renderHistory();
+    sendMessage(text, pendingFiles, false);
+    clearPendingFiles();
+}
+
+// === RENDER HISTORY ===
+function renderHistory() {
+    messagesWrapper.innerHTML = '';
+    welcomeScreen.style.display = currentChatHistory.length === 0 ? 'flex' : 'none';
+    currentChatHistory.forEach(msg => {
+        appendMessage(msg.text, msg.sender, true, msg.files);
+    });
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+}
+
+// === SEND TO API ===
+async function sendMessage(text, files, isRegenerate = false) {
+    isGenerating = true;
+    regenBtn.style.display = 'none';
+    stopBtn.style.display = 'flex';
+
+    if (welcomeScreen.style.display !== 'none') {
+        welcomeScreen.style.display = 'none';
+    }
+
+    chatContainer.scrollTop = chatContainer.scrollHeight;
+
+    const botMsgDiv = appendMessage('', 'bot', false);
+    const contentDiv = botMsgDiv.querySelector('.message-content');
+    contentDiv.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
+
+    abortController = new AbortController();
+    let fullResponse = '';
+
+    // Show uploading state if files are present
+    const hasFiles = files && files.length > 0;
+    if (hasFiles) setUploadingState(true);
+
+    try {
+        let response;
+
+        if (hasFiles) {
+            const formData = new FormData();
+            formData.append('message', text || '');
+            formData.append('sessionId', currentSessionId);
+            formData.append('userName', userName);
+            formData.append('userGender', userGender);
+            formData.append('userLocation', userLocation || '');
+            formData.append('model', 'gemini-2.5-flash');
+            formData.append('temperature', '0.7');
+            for (const f of files) {
+                formData.append('files', f.file, f.name);
+            }
+
+            response = await fetch('/api/chat', {
+                method: 'POST',
+                body: formData,
+                signal: abortController.signal
+            });
+        } else {
+            response = await fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message: text,
+                    sessionId: currentSessionId,
+                    userName: userName,
+                    userGender: userGender,
+                    userLocation: userLocation || '',
+                    model: 'gemini-2.5-flash',
+                    temperature: 0.7
+                }),
+                signal: abortController.signal
+            });
+        }
+
+        // Clear uploading state once response starts
+        if (hasFiles) setUploadingState(false);
+
+        if (!response.ok) {
+            let errorMsg = 'Failed to get response';
+            try {
+                const errData = await response.json();
+                errorMsg = errData.error || errorMsg;
+            } catch(e) {}
+            contentDiv.innerHTML = `<span style="color: #ef4444;">❌ Error: ${errorMsg}</span>`;
+            fullResponse = errorMsg;
+        } else {
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder("utf-8");
+            let done = false;
+            let buffer = '';
+
+            while (!done) {
+                const { value, done: readerDone } = await reader.read();
+                done = readerDone;
+                if (value) {
+                    const chunk = decoder.decode(value, { stream: true });
+                    buffer += chunk;
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop();
+
+                    for (const line of lines) {
+                        if (line.trim() === '') continue;
+                        if (line.startsWith('data: ')) {
+                            const dataStr = line.substring(6);
+                            if (dataStr === '[DONE]') { done = true; break; }
+                            try {
+                                const data = JSON.parse(dataStr);
+                                if (data.text) {
+                                    fullResponse += data.text;
+                                    // If the response looks like JSON, show a loading placeholder
+                                    // instead of rendering partial JSON as broken markdown
+                                    if (OXYWidgetRenderer.looksLikeJSON(fullResponse)) {
+                                        contentDiv.innerHTML = '<div class="widget-loading"><span class="widget-loading-dot"></span><span class="widget-loading-dot"></span><span class="widget-loading-dot"></span><span class="widget-loading-text">Building widget…</span></div>';
+                                    } else {
+                                        const rawHtml = marked.parse(fullResponse);
+                                        contentDiv.innerHTML = DOMPurify.sanitize(rawHtml);
+                                        formatCodeBlocks(contentDiv);
+                                    }
+                                    chatContainer.scrollTop = chatContainer.scrollHeight;
+                                } else if (data.error) {
+                                    contentDiv.innerHTML += `<br><span style="color: #ef4444;">❌ ${data.error}</span>`;
+                                }
+                            } catch (parseErr) {
+                                // Skip malformed JSON chunks silently
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Only push to history if not regenerating (regenerate replaces last)
+        if (!isRegenerate) {
+            currentChatHistory.push({ text: fullResponse, sender: 'bot' });
+            saveSession();
+        } else if (isGenerating) {
+            currentChatHistory.push({ text: fullResponse, sender: 'bot' });
+            saveSession();
+        }
+
+    } catch (error) {
+        if (hasFiles) setUploadingState(false);
+
+        if (error.name === 'AbortError') {
+            const stoppedMsg = fullResponse + '\n\n*(Stopped)*';
+            currentChatHistory.push({ text: stoppedMsg, sender: 'bot' });
+            saveSession();
+            fullResponse = stoppedMsg;
+        } else {
+            contentDiv.innerHTML = '<span style="color: #ef4444;">❌ Network error. Please try again.</span>';
+            console.error('Chat error:', error);
+            fullResponse = 'Network error';
+        }
+    } finally {
+        isGenerating = false;
+        stopBtn.style.display = 'none';
+        regenBtn.style.display = 'flex';
+        if (fullResponse) {
+            // Check if the final response is a widget (JSON)
+            const widgetResult = OXYWidgetRenderer.detectAndRender(fullResponse);
+            if (widgetResult) {
+                contentDiv.innerHTML = `<div class="oxy-widget-container">${widgetResult.html}</div>`;
+            } else {
+                const rawHtml = marked.parse(fullResponse);
+                contentDiv.innerHTML = DOMPurify.sanitize(rawHtml);
+                formatCodeBlocks(contentDiv);
+            }
+        }
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
+}
+
+// === STOP / REGEN ===
+function stopGeneration() {
+    if (abortController) {
+        abortController.abort();
+        isGenerating = false;
+        stopBtn.style.display = 'none';
+        regenBtn.style.display = 'flex';
+        saveSession();
+    }
+}
+
+stopBtn.addEventListener('click', stopGeneration);
+
+regenBtn.addEventListener('click', () => {
+    if (currentChatHistory.length >= 2) {
+        const lastMsg = currentChatHistory[currentChatHistory.length - 1];
+        if (lastMsg.sender === 'bot') {
+            currentChatHistory.pop();
+            const lastUserMsg = currentChatHistory[currentChatHistory.length - 1];
+            renderHistory();
+            sendMessage(lastUserMsg.text, [], true);
+        }
+    }
+});
+
+// === KEYBOARD ===
+messageInput.addEventListener('input', function() {
+    this.style.height = 'auto';
+    this.style.height = (this.scrollHeight) + 'px';
+    this.style.overflowY = this.scrollHeight > 150 ? 'auto' : 'hidden';
+    updateSendButton();
+});
+
+messageInput.addEventListener('keydown', function(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        if (!sendBtn.disabled && !isGenerating) handleSend();
+    }
+});
+
+sendBtn.addEventListener('click', handleSend);
+
+window.copyCode = function(btn) {
+    const wrapper = btn.closest('.code-block-wrapper');
+    const code = wrapper.querySelector('code').innerText;
+    navigator.clipboard.writeText(code).then(() => {
+        const originalHtml = btn.innerHTML;
+        btn.innerHTML = '<i class="fa-solid fa-check"></i> Copied!';
+        btn.style.color = '#10b981';
+        setTimeout(() => { btn.innerHTML = originalHtml; btn.style.color = ''; }, 2000);
+    });
+};
+
+// Copy message to clipboard
+window.copyMessage = function(text) {
+    navigator.clipboard.writeText(text).then(() => {
+        showToast('Message copied', 'success');
+    }).catch(() => {
+        showToast('Failed to copy', 'error');
+    });
+};
+
+// Edit message - convert to editable textarea
+window.editMessage = function(btn) {
+    const msgDiv = btn.closest('.message');
+    const textEl = msgDiv.querySelector('.msg-text-content');
+    const originalText = textEl.textContent;
+
+    // Create textarea for editing
+    const textarea = document.createElement('textarea');
+    textarea.className = 'msg-edit-textarea';
+    textarea.value = originalText;
+    textarea.rows = 3;
+
+    // Replace text with textarea
+    textEl.replaceWith(textarea);
+    textarea.focus();
+
+    // Create action buttons for edit mode
+    const actionsDiv = msgDiv.querySelector('.message-actions');
+    actionsDiv.innerHTML = `
+        <button class="msg-action-btn msg-edit-save" onclick="saveEditedMessage(this)" title="Send">
+            <i class="fa-solid fa-paper-plane"></i>
+        </button>
+        <button class="msg-action-btn msg-edit-cancel" onclick="cancelEditMessage(this)" title="Cancel">
+            <i class="fa-solid fa-xmark"></i>
+        </button>
+    `;
+
+    // Handle Enter/Shift+Enter
+    textarea.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            saveEditedMessage(btn.closest('.message').querySelector('.msg-edit-save'));
+        }
+        if (e.key === 'Escape') {
+            cancelEditMessage(btn.closest('.message').querySelector('.msg-edit-cancel'));
+        }
+    });
+};
+
+// Save edited message and resend
+window.saveEditedMessage = function(btn) {
+    const msgDiv = btn.closest('.message');
+    const textarea = msgDiv.querySelector('.msg-edit-textarea');
+    const newText = textarea.value.trim();
+
+    if (!newText) return;
+
+    // Find the index of this message in history
+    const msgIndex = Array.from(messagesWrapper.children).indexOf(msgDiv);
+    if (msgIndex >= 0) {
+        // Remove the message and all subsequent messages
+        currentChatHistory.splice(msgIndex, currentChatHistory.length - msgIndex);
+        renderHistory();
+
+        // Resend the edited message
+        messageInput.value = newText;
+        handleSend();
+    }
+};
+
+// Cancel edit and restore original
+window.cancelEditMessage = function(btn) {
+    const msgDiv = btn.closest('.message');
+    const textarea = msgDiv.querySelector('.msg-edit-textarea');
+    const originalText = textarea.value;
+
+    const textEl = document.createElement('div');
+    textEl.className = 'msg-text-content';
+    textEl.textContent = originalText;
+    textarea.replaceWith(textEl);
+
+    const actionsDiv = msgDiv.querySelector('.message-actions');
+    actionsDiv.innerHTML = `
+        <button class="msg-action-btn" onclick="copyMessage('${originalText.replace(/'/g, '\\x27')}')" title="Copy">
+            <i class="fa-regular fa-copy"></i>
+        </button>
+        <button class="msg-action-btn" onclick="editMessage(this)" title="Edit">
+            <i class="fa-solid fa-pen"></i>
+        </button>
+    `;
+};
+
+window.sendSuggestion = function(text) {
+    messageInput.value = text;
+    updateSendButton();
+    handleSend();
+};
+
+// === CODE BLOCK FORMATTING ===
+function formatCodeBlocks(container) {
+    const blocks = container.querySelectorAll('pre code');
+    blocks.forEach((block) => {
+        const pre = block.parentElement;
+        if (!pre.parentElement.classList.contains('code-block-wrapper')) {
+            const lang = block.className.replace('hljs language-', '').replace('language-', '') || 'code';
+            const wrapper = document.createElement('div');
+            wrapper.className = 'code-block-wrapper';
+            const header = document.createElement('div');
+            header.className = 'code-header';
+            header.innerHTML = `<span>${lang}</span><button class="copy-btn" onclick="copyCode(this)"><i class="fa-regular fa-copy"></i> Copy</button>`;
+            pre.parentNode.insertBefore(wrapper, pre);
+            wrapper.appendChild(header);
+            wrapper.appendChild(pre);
+        }
+    });
+}
+
+// === SERVICE WORKER (PWA) ===
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/service-worker.js')
+            .then(reg => console.log('ServiceWorker registered:', reg.scope))
+            .catch(err => console.log('ServiceWorker registration failed:', err));
+    });
+}
+
+// === INIT ===
+function initApp() {
+    updateUserUI();
+    loadSessionsList();
+    initLocation();
+    if (!currentSessionId) createNewSession();
+}
+
+initApp();

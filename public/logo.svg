@@ -1,0 +1,23 @@
+
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+  <!-- Dark background to match the theme (optional, but good for some icons). We'll make it transparent as requested -->
+  <rect width="512" height="512" fill="transparent" />
+  
+  <!-- Outer ring (inset 0 in CSS, 1.5px border on 38px size -> 512px scale)
+       1.5/38 * 512 = ~20px border -->
+  <circle cx="256" cy="256" r="246" fill="transparent" stroke="rgba(255, 255, 255, 0.08)" stroke-width="20" />
+  
+  <!-- Inner ring (inset 2px in CSS, 2px border on 38px size)
+       2/38 * 512 = ~27px border
+       Radius is (38 - 4) / 2 = 17.  17/19 * 256 = 229 -->
+  <circle cx="256" cy="256" r="229" fill="transparent" stroke="rgba(255, 255, 255, 0.25)" stroke-width="27" />
+
+  <!-- Center glow (approximate the radial gradient) -->
+  <defs>
+    <radialGradient id="glow" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="rgba(255, 255, 255, 0.15)" />
+      <stop offset="70%" stop-color="transparent" />
+    </radialGradient>
+  </defs>
+  <circle cx="256" cy="256" r="256" fill="url(#glow)" />
+</svg>
