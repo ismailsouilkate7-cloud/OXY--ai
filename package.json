@@ -5,8 +5,10 @@
   "main": "server.js",
   "type": "module",
   "scripts": {
+    "dev": "node server.js",
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "build": "next build",
+    "vercel-build": "echo 'Skipping Next.js build for Express server'"
   },
   "dependencies": {
     "@google/genai": "^2.7.0",
@@ -19,6 +21,15 @@
     "jszip": "^3.10.1",
     "mime-types": "^3.0.2",
     "multer": "^2.1.1",
+    "next": "^15.4.1",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0",
     "uuid": "^14.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.15.17",
+    "@types/react": "^19.1.2",
+    "@types/react-dom": "^19.1.2",
+    "typescript": "^5.8.3"
   }
 }
