@@ -288,6 +288,16 @@ function createNewSession() {
     pendingFiles = [];
     updateFilePreviewStrip();
     loadSessionsList();
+    
+    // Register this new session on the server for analytics
+    fetch('/api/session/create', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionId: currentSessionId })
+    }).catch(err => {
+        // Non-critical — analytics tracking is best-effort
+        console.log('[Analytics] Session registration skipped:', err.message);
+    });
 }
 
 document.getElementById('new-chat-btn').addEventListener('click', createNewSession);

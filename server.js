@@ -10,6 +10,8 @@ import { v4 as uuidv4 } from 'uuid';
 import compression from 'compression';
 import fs from 'fs';
 import DDG from 'duck-duck-scrape';
+import cookieParser from 'cookie-parser';
+import crypto from 'crypto';
 
 dotenv.config();
 
@@ -118,6 +120,680 @@ app.use((req, res, next) => {
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     if (req.method === 'OPTIONS') return res.sendStatus(204);
     next();
+});
+
+// ============================================================
+// COOKIE PARSER — for admin session cookies
+// ============================================================
+app.use(cookieParser());
+
+// ============================================================
+// ADMIN AUTHENTICATION SYSTEM
+// ============================================================
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
+const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+
+// Store active admin sessions (token -> { authenticated: true, createdAt })
+const adminSessions = new Map();
+const ADMIN_SESSION_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
+if (!ADMIN_PASSWORD) {
+    console.warn('[Admin] ⚠️ ADMIN_PASSWORD not set in .env — /admin route will be disabled');
+} else {
+    console.log('[Admin] ✅ Admin authentication enabled');
+}
+
+// Admin authentication middleware — checks for valid session cookie
+function requireAdminAuth(req, res, next) {
+    // If admin password is not configured, block all admin access
+    if (!ADMIN_PASSWORD) {
+        return res.status(503).send('Admin panel is not configured. Set ADMIN_PASSWORD in .env');
+    }
+
+    const token = req.cookies?.admin_token;
+    
+    if (token && adminSessions.has(token)) {
+        const session = adminSessions.get(token);
+        // Check if session is still valid
+        if (Date.now() - session.createdAt < ADMIN_SESSION_TTL) {
+            req.adminAuthenticated = true;
+            return next();
+        } else {
+            // Session expired — clean it up
+            adminSessions.delete(token);
+        }
+    }
+    
+    // Not authenticated — redirect to login or return 401 for API calls
+    if (req.path.startsWith('/api/admin/')) {
+        return res.status(401).json({ error: 'Unauthorized. Please login first.' });
+    }
+    
+    // For page requests, redirect to login
+    res.redirect('/admin/login');
+}
+
+// ============================================================
+// ADMIN LOGIN PAGE — server-rendered HTML (GET /admin)
+// ============================================================
+const ADMIN_LOGIN_PAGE = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Login — OXY AI</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #0f0f13;
+            color: #e8e8ed;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+        }
+        .login-container {
+            background: #1a1a24;
+            border: 1px solid #2a2a3a;
+            border-radius: 16px;
+            padding: 40px;
+            width: 100%;
+            max-width: 400px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
+        }
+        .login-logo {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 8px;
+        }
+        .logo-ring {
+            width: 40px;
+            height: 40px;
+            border: 3px solid #a855f7;
+            border-radius: 50%;
+            position: relative;
+            overflow: hidden;
+            background: transparent;
+        }
+        .logo-ring::before {
+            content: '';
+            position: absolute;
+            width: 100%;
+            height: 50%;
+            background: #a855f7;
+            top: 0;
+            left: 0;
+            border-radius: 0 0 50% 50% / 0 0 100% 100%;
+        }
+        .logo-text { font-size: 28px; font-weight: 700; letter-spacing: 2px; }
+        .logo-text span:first-child { color: #a855f7; }
+        .logo-text span:last-child { color: #e8e8ed; }
+        h1 { text-align: center; font-size: 20px; font-weight: 600; margin-bottom: 28px; color: #c0c0d0; }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; font-size: 14px; color: #8a8a9a; margin-bottom: 8px; }
+        input[type="password"] {
+            width: 100%;
+            padding: 14px 16px;
+            background: #0f0f13;
+            border: 1px solid #2a2a3a;
+            border-radius: 10px;
+            color: #e8e8ed;
+            font-size: 16px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        input[type="password"]:focus { border-color: #a855f7; }
+        .login-btn {
+            width: 100%;
+            padding: 14px;
+            background: #a855f7;
+            color: #fff;
+            border: none;
+            border-radius: 10px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .login-btn:hover { background: #9333ea; }
+        .login-btn:disabled { opacity: 0.6; cursor: not-allowed; }
+        .error-msg {
+            background: #3b1a1a;
+            border: 1px solid #6b2a2a;
+            color: #f87171;
+            padding: 12px 16px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            text-align: center;
+            display: none;
+        }
+        .error-msg.visible { display: block; }
+        .loading-spinner {
+            display: none;
+            width: 20px;
+            height: 20px;
+            border: 2px solid rgba(255,255,255,0.3);
+            border-top-color: #fff;
+            border-radius: 50%;
+            animation: spin 0.6s linear infinite;
+            margin: 0 auto;
+        }
+        .loading-spinner.visible { display: inline-block; }
+        .btn-text { display: inline; }
+        .btn-text.hidden { display: none; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .footer { margin-top: 20px; text-align: center; color: #5a5a6a; font-size: 13px; }
+        .footer a { color: #a855f7; text-decoration: none; }
+        .footer a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="login-container">
+        <div class="login-logo">
+            <div class="logo-ring"></div>
+            <div class="logo-text"><span>OXY</span><span>AI</span></div>
+        </div>
+        <h1>Admin Login</h1>
+        <div class="error-msg" id="error-msg"></div>
+        <form id="login-form" onsubmit="handleLogin(event)">
+            <div class="form-group">
+                <label for="password">Admin Password</label>
+                <input type="password" id="password" placeholder="Enter admin password" autocomplete="current-password" required>
+            </div>
+            <button type="submit" class="login-btn" id="login-btn">
+                <span class="btn-text" id="btn-text">Login</span>
+                <span class="loading-spinner" id="loading-spinner"></span>
+            </button>
+        </form>
+    </div>
+    <div class="footer">
+        <a href="/">← Back to OXY AI</a>
+    </div>
+    <script>
+        async function handleLogin(e) {
+            e.preventDefault();
+            const password = document.getElementById('password').value;
+            const errorMsg = document.getElementById('error-msg');
+            const loginBtn = document.getElementById('login-btn');
+            const btnText = document.getElementById('btn-text');
+            const spinner = document.getElementById('loading-spinner');
+            
+            errorMsg.classList.remove('visible');
+            loginBtn.disabled = true;
+            btnText.classList.add('hidden');
+            spinner.classList.add('visible');
+            
+            try {
+                const res = await fetch('/api/admin/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ password })
+                });
+                const data = await res.json();
+                
+                if (res.ok && data.success) {
+                    window.location.href = '/admin/dashboard';
+                } else {
+                    errorMsg.textContent = data.error || 'Wrong password';
+                    errorMsg.classList.add('visible');
+                    loginBtn.disabled = false;
+                    btnText.classList.remove('hidden');
+                    spinner.classList.remove('visible');
+                }
+            } catch (err) {
+                errorMsg.textContent = 'Connection error. Please try again.';
+                errorMsg.classList.add('visible');
+                loginBtn.disabled = false;
+                btnText.classList.remove('hidden');
+                spinner.classList.remove('visible');
+            }
+        }
+    </script>
+</body>
+</html>`;
+
+// ============================================================
+// ADMIN DASHBOARD PAGE — server-rendered HTML (GET /admin/dashboard)
+// ============================================================
+const ADMIN_DASHBOARD_PAGE = `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Admin Dashboard — OXY AI</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #0f0f13;
+            color: #e8e8ed;
+            min-height: 100vh;
+        }
+        .admin-header {
+            background: #1a1a24;
+            border-bottom: 1px solid #2a2a3a;
+            padding: 16px 32px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .admin-header-left {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+        }
+        .logo-text { font-size: 22px; font-weight: 700; letter-spacing: 1px; }
+        .logo-text span:first-child { color: #a855f7; }
+        .logo-text span:last-child { color: #e8e8ed; }
+        .admin-badge {
+            background: #2a1a3a;
+            color: #a855f7;
+            padding: 4px 12px;
+            border-radius: 6px;
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+        .admin-header-right { display: flex; align-items: center; gap: 16px; }
+        .logout-btn {
+            padding: 8px 20px;
+            background: #2a2a3a;
+            color: #e8e8ed;
+            border: 1px solid #3a3a4a;
+            border-radius: 8px;
+            font-size: 14px;
+            font-weight: 500;
+            cursor: pointer;
+            transition: background 0.2s;
+            text-decoration: none;
+        }
+        .logout-btn:hover { background: #3a2a2a; border-color: #6b2a2a; color: #f87171; }
+        .back-btn {
+            padding: 8px 16px;
+            background: transparent;
+            color: #8a8a9a;
+            border: none;
+            font-size: 14px;
+            cursor: pointer;
+            text-decoration: none;
+            transition: color 0.2s;
+        }
+        .back-btn:hover { color: #a855f7; }
+        .dashboard-content {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 40px 24px;
+        }
+        .dashboard-title { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
+        .dashboard-subtitle { color: #8a8a9a; margin-bottom: 32px; }
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+            gap: 20px;
+            margin-bottom: 40px;
+        }
+        .stat-card {
+            background: #1a1a24;
+            border: 1px solid #2a2a3a;
+            border-radius: 12px;
+            padding: 24px;
+        }
+        .stat-card h3 { font-size: 14px; color: #8a8a9a; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
+        .stat-card .stat-value { font-size: 32px; font-weight: 700; color: #a855f7; }
+        .admin-section {
+            background: #1a1a24;
+            border: 1px solid #2a2a3a;
+            border-radius: 12px;
+            padding: 24px;
+            margin-bottom: 24px;
+        }
+        .admin-section h2 { font-size: 18px; font-weight: 600; margin-bottom: 16px; color: #c0c0d0; }
+        .admin-section p { color: #8a8a9a; line-height: 1.6; font-size: 14px; }
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 0;
+            border-bottom: 1px solid #2a2a3a;
+            font-size: 14px;
+        }
+        .info-row:last-child { border-bottom: none; }
+        .info-label { color: #8a8a9a; }
+        .info-value { color: #e8e8ed; font-weight: 500; }
+        .status-indicator {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #22c55e;
+        }
+        .status-dot.inactive { background: #6b7280; }
+        .status-dot.warning { background: #eab308; }
+    </style>
+</head>
+<body>
+    <div class="admin-header">
+        <div class="admin-header-left">
+            <div class="logo-text"><span>OXY</span><span>AI</span></div>
+            <span class="admin-badge">Admin</span>
+        </div>
+        <div class="admin-header-right">
+            <a href="/" class="back-btn">← Back to App</a>
+            <a href="/api/admin/logout" class="logout-btn">Logout</a>
+        </div>
+    </div>
+    <div class="dashboard-content">
+        <h1 class="dashboard-title">Analytics Dashboard</h1>
+        <p class="dashboard-subtitle">Overview of OXY AI system status and analytics</p>
+        
+        <div class="stats-grid">
+            <div class="stat-card">
+                <h3>Server Status</h3>
+                <div class="stat-value"><span class="status-indicator"><span class="status-dot" id="status-dot"></span> <span id="server-status">Online</span></span></div>
+            </div>
+            <div class="stat-card">
+                <h3>Online Now</h3>
+                <div class="stat-value" id="online-now">—</div>
+            </div>
+            <div class="stat-card">
+                <h3>Active Chats (30m)</h3>
+                <div class="stat-value" id="active-chats">—</div>
+            </div>
+            <div class="stat-card">
+                <h3>Today's Messages</h3>
+                <div class="stat-value" id="today-messages">—</div>
+            </div>
+            <div class="stat-card">
+                <h3>Total Messages</h3>
+                <div class="stat-value" id="total-messages">—</div>
+            </div>
+            <div class="stat-card">
+                <h3>API Keys</h3>
+                <div class="stat-value" id="api-key-count">—</div>
+            </div>
+        </div>
+        
+        <div class="admin-section">
+            <h2>Activity Overview</h2>
+            <div class="info-row">
+                <span class="info-label">Online Now (last 5 min)</span>
+                <span class="info-value" id="online-now-detail">—</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Active Users (last 10 min)</span>
+                <span class="info-value" id="active-10min">—</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Active Chats (last 30 min)</span>
+                <span class="info-value" id="active-chats-detail">—</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Total Sessions (all time)</span>
+                <span class="info-value" id="total-sessions">—</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Today's Messages</span>
+                <span class="info-value" id="today-messages-detail">—</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Today's Uploads</span>
+                <span class="info-value" id="today-uploads">—</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Total Messages (all time)</span>
+                <span class="info-value" id="total-messages-detail">—</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Total Uploads (all time)</span>
+                <span class="info-value" id="total-uploads">—</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Chat Sessions</span>
+                <span class="info-value" id="active-chat-sessions">—</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Memory Sessions</span>
+                <span class="info-value" id="memory-sessions">—</span>
+            </div>
+        </div>
+        
+        <div class="admin-section">
+            <h2>System Information</h2>
+            <div class="info-row">
+                <span class="info-label">Platform</span>
+                <span class="info-value" id="platform">—</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Node.js Version</span>
+                <span class="info-value" id="node-version">—</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Uptime</span>
+                <span class="info-value" id="uptime">—</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Server Time</span>
+                <span class="info-value" id="server-time">—</span>
+            </div>
+        </div>
+        
+        <div class="admin-section">
+            <h2>Security</h2>
+            <div class="info-row">
+                <span class="info-label">Authentication</span>
+                <span class="info-value status-indicator"><span class="status-dot"></span> Active</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Session Duration</span>
+                <span class="info-value">24 hours</span>
+            </div>
+            <div class="info-row">
+                <span class="info-label">Session Storage</span>
+                <span class="info-value">Server-side (in-memory)</span>
+            </div>
+        </div>
+    </div>
+    <script>
+        async function loadStats() {
+            try {
+                const res = await fetch('/api/admin/stats');
+                if (res.status === 401) {
+                    window.location.href = '/admin/login';
+                    return;
+                }
+                const data = await res.json();
+                
+                // Update dashboard with real data
+                document.getElementById('server-status').textContent = data.serverStatus || 'Online';
+                document.getElementById('online-now').textContent = data.onlineNow || 0;
+                document.getElementById('active-chats').textContent = data.activeChats || 0;
+                document.getElementById('today-messages').textContent = data.todayMessages || 0;
+                document.getElementById('total-messages').textContent = data.totalMessages || 0;
+                document.getElementById('api-key-count').textContent = data.apiKeyCount || 0;
+                
+                // Detail section
+                document.getElementById('online-now-detail').textContent = data.onlineNow || 0;
+                document.getElementById('active-10min').textContent = data.activeChatsLast10min || 0;
+                document.getElementById('active-chats-detail').textContent = data.activeChats || 0;
+                document.getElementById('total-sessions').textContent = data.totalSessions || 0;
+                document.getElementById('today-messages-detail').textContent = data.todayMessages || 0;
+                document.getElementById('today-uploads').textContent = data.todayUploads || 0;
+                document.getElementById('total-messages-detail').textContent = data.totalMessages || 0;
+                document.getElementById('total-uploads').textContent = data.totalUploads || 0;
+                document.getElementById('active-chat-sessions').textContent = data.activeChatSessions || 0;
+                document.getElementById('memory-sessions').textContent = data.memorySessions || 0;
+                document.getElementById('platform').textContent = data.platform || '—';
+                document.getElementById('node-version').textContent = data.nodeVersion || '—';
+                
+                const uptime = data.uptime || 0;
+                const hours = Math.floor(uptime / 3600);
+                const mins = Math.floor((uptime % 3600) / 60);
+                document.getElementById('uptime').textContent = hours + 'h ' + mins + 'm';
+                document.getElementById('server-time').textContent = data.serverTime || '—';
+            } catch (err) {
+                console.error('Failed to load stats:', err);
+            }
+        }
+        loadStats();
+        setInterval(loadStats, 15000); // Refresh every 15 seconds
+    </script>
+</body>
+</html>`;
+
+// ============================================================
+// ADMIN ROUTES
+// ============================================================
+
+// GET /admin — redirect to login page or dashboard if already authenticated
+app.get('/admin', (req, res) => {
+    const token = req.cookies?.admin_token;
+    if (token && adminSessions.has(token)) {
+        const session = adminSessions.get(token);
+        if (Date.now() - session.createdAt < ADMIN_SESSION_TTL) {
+            return res.redirect('/admin/dashboard');
+        }
+    }
+    res.send(ADMIN_LOGIN_PAGE);
+});
+
+// GET /admin/login — login page
+app.get('/admin/login', (req, res) => {
+    const token = req.cookies?.admin_token;
+    if (token && adminSessions.has(token)) {
+        const session = adminSessions.get(token);
+        if (Date.now() - session.createdAt < ADMIN_SESSION_TTL) {
+            return res.redirect('/admin/dashboard');
+        }
+    }
+    res.send(ADMIN_LOGIN_PAGE);
+});
+
+// GET /admin/dashboard — protected analytics dashboard
+app.get('/admin/dashboard', requireAdminAuth, (req, res) => {
+    res.send(ADMIN_DASHBOARD_PAGE);
+});
+
+// POST /api/admin/login — authenticate admin
+app.post('/api/admin/login', (req, res) => {
+    const { password } = req.body;
+    
+    if (!ADMIN_PASSWORD) {
+        return res.status(503).json({ success: false, error: 'Admin panel is not configured.' });
+    }
+    
+    if (!password) {
+        return res.status(400).json({ success: false, error: 'Password is required.' });
+    }
+    
+    if (password === ADMIN_PASSWORD) {
+        // Generate a session token
+        const token = crypto.randomBytes(32).toString('hex');
+        adminSessions.set(token, { authenticated: true, createdAt: Date.now() });
+        
+        // Set secure httpOnly cookie
+        res.cookie('admin_token', token, {
+            httpOnly: true,
+            secure: !!process.env.VERCEL || !!process.env.VERCEL_ENV, // only secure on Vercel
+            sameSite: 'lax',
+            maxAge: ADMIN_SESSION_TTL,
+            path: '/'
+        });
+        
+        console.log('[Admin] ✅ Successful admin login');
+        return res.json({ success: true });
+    } else {
+        console.warn('[Admin] ❌ Failed login attempt');
+        return res.status(401).json({ success: false, error: 'Wrong password' });
+    }
+});
+
+// GET /api/admin/logout — clear session cookie
+app.get('/api/admin/logout', (req, res) => {
+    const token = req.cookies?.admin_token;
+    if (token) {
+        adminSessions.delete(token);
+    }
+    res.clearCookie('admin_token', { path: '/' });
+    console.log('[Admin] ✅ Admin logged out');
+    res.redirect('/admin/login');
+});
+
+// GET /api/admin/stats — fetch dashboard statistics (protected, real data)
+app.get('/api/admin/stats', requireAdminAuth, (req, res) => {
+    const analytics = getAnalyticsSummary();
+    res.json({
+        serverStatus: 'Online',
+        activeChats: analytics.activeChats,
+        activeChatsLast10min: analytics.activeChatsLast10min,
+        onlineNow: analytics.onlineNow,
+        totalSessions: analytics.totalSessions,
+        totalMessages: analytics.totalMessages,
+        todayMessages: analytics.todayMessages,
+        totalUploads: analytics.totalUploads,
+        todayUploads: analytics.todayUploads,
+        activeChatSessions: chatSessions?.size || 0,
+        apiKeyCount: API_KEYS?.length || 0,
+        memorySessions: CONVERSATION_MEMORY?.size || 0,
+        platform: process.platform,
+        nodeVersion: process.version,
+        uptime: process.uptime(),
+        serverTime: new Date().toLocaleString('en-US', { 
+            weekday: 'long', 
+            year: 'numeric', 
+            month: 'long', 
+            day: 'numeric',
+            hour: '2-digit', 
+            minute: '2-digit',
+            second: '2-digit',
+            timeZoneName: 'short'
+        })
+    });
+});
+
+// POST /api/admin/heartbeat — client heartbeat to track active users
+app.post('/api/admin/heartbeat', (req, res) => {
+    const sessionId = req.body?.sessionId || req.headers['x-session-id'];
+    if (sessionId) {
+        trackUserActivity(sessionId, 'heartbeat');
+    }
+    res.json({ success: true });
+});
+
+// ============================================================
+// SESSION TRACKING — for analytics
+// ============================================================
+
+// POST /api/session/create — register a new chat session
+app.post('/api/session/create', (req, res) => {
+    const { sessionId } = req.body;
+    
+    if (!sessionId) {
+        return res.status(400).json({ error: 'sessionId is required' });
+    }
+    
+    // Track this as a new session immediately (marks it as active)
+    trackUserActivity(sessionId, 'heartbeat');
+    
+    console.log(`[Session] ✅ Created new session: ${sessionId.substring(0, 12)}...`);
+    res.json({ success: true, sessionId });
+});
+
+// GET /api/session/active — returns active session count (for dashboard)
+app.get('/api/session/active', (req, res) => {
+    const analytics = getAnalyticsSummary();
+    res.json({ 
+        activeChats: analytics.activeChats,
+        totalSessions: analytics.totalSessions
+    });
 });
 
 // Allowed MIME types
@@ -727,6 +1403,153 @@ FORMATTING & RESPONSE STRUCTURE (additive improvements — do NOT remove existin
 
 // Store chat sessions in memory
 const chatSessions = new Map();
+
+// ============================================================
+// REAL-TIME ANALYTICS TRACKING SYSTEM
+// ============================================================
+
+// Tracks user activity for analytics (sessionId -> { lastSeen, messageCount, sessionCreated })
+const userActivity = new Map();
+const ACTIVE_USER_TIMEOUT = 10 * 60 * 1000; // 10 minutes for "active" status
+const ACTIVE_HEARTBEAT_TIMEOUT = 5 * 60 * 1000; // 5 minutes for "online now"
+
+// Track analytics events
+const analyticsEvents = {
+    totalMessages: 0,
+    totalUploads: 0,
+    todayMessages: 0,
+    todayUploads: 0,
+    lastResetDate: new Date().toDateString(),
+    sessionsCreated: 0
+};
+
+// Reset daily counters if day changed
+function checkDailyReset() {
+    const today = new Date().toDateString();
+    if (analyticsEvents.lastResetDate !== today) {
+        analyticsEvents.todayMessages = 0;
+        analyticsEvents.todayUploads = 0;
+        analyticsEvents.lastResetDate = today;
+        console.log('[Analytics] ✅ Daily counters reset for new day');
+    }
+}
+
+// Track a user activity event
+function trackUserActivity(sessionId, eventType = 'message') {
+    if (!sessionId) return;
+    
+    checkDailyReset();
+    
+    const now = Date.now();
+    let activity = userActivity.get(sessionId);
+    
+    if (!activity) {
+        // New session detected
+        activity = {
+            sessionId,
+            firstSeen: now,
+            lastSeen: now,
+            messageCount: 0,
+            uploadCount: 0,
+            sessionCreated: now
+        };
+        userActivity.set(sessionId, activity);
+        analyticsEvents.sessionsCreated++;
+    }
+    
+    activity.lastSeen = now;
+    
+    if (eventType === 'message') {
+        activity.messageCount++;
+        analyticsEvents.totalMessages++;
+        analyticsEvents.todayMessages++;
+    } else if (eventType === 'upload') {
+        activity.uploadCount++;
+        analyticsEvents.totalUploads++;
+        analyticsEvents.todayUploads++;
+    }
+}
+
+// Get count of users active within the last N minutes
+function getActiveUserCount(timeoutMs = ACTIVE_USER_TIMEOUT) {
+    const now = Date.now();
+    let count = 0;
+    for (const [_, activity] of userActivity) {
+        if (now - activity.lastSeen < timeoutMs) {
+            count++;
+        }
+    }
+    return count;
+}
+
+// Get count of users online now (last 5 minutes - heartbeat)
+function getOnlineNowCount() {
+    return getActiveUserCount(ACTIVE_HEARTBEAT_TIMEOUT);
+}
+
+// Get total messages sent today
+function getTodayMessages() {
+    checkDailyReset();
+    return analyticsEvents.todayMessages;
+}
+
+// Get total messages all time
+function getTotalMessages() {
+    return analyticsEvents.totalMessages;
+}
+
+// Get analytics summary
+function getAnalyticsSummary() {
+    checkDailyReset();
+    
+    const now = Date.now();
+    let totalActiveSessions = 0;
+    let totalSessionMessages = 0;
+    
+    for (const [_, activity] of userActivity) {
+        totalActiveSessions++;
+        totalSessionMessages += activity.messageCount;
+    }
+    
+    // Calculate current active chats (sessions with activity in last 30 min)
+    const recentSessions = [];
+    for (const [sessionId, activity] of userActivity) {
+        if (now - activity.lastSeen < 30 * 60 * 1000) {
+            recentSessions.push({
+                sessionId,
+                lastSeen: activity.lastSeen,
+                messageCount: activity.messageCount,
+                age: Math.floor((now - activity.firstSeen) / 1000)
+            });
+        }
+    }
+    
+    return {
+        activeChats: recentSessions.length,
+        activeChatsLast10min: getActiveUserCount(),
+        onlineNow: getOnlineNowCount(),
+        totalSessions: totalActiveSessions,
+        totalMessages: totalSessionMessages,
+        todayMessages: analyticsEvents.todayMessages,
+        totalUploads: analyticsEvents.totalUploads,
+        todayUploads: analyticsEvents.todayUploads,
+        recentSessions: recentSessions.slice(-10) // last 10 for detail
+    };
+}
+
+// Cleanup stale activity entries (older than 24 hours)
+function cleanupStaleActivity() {
+    const now = Date.now();
+    const staleTimeout = 24 * 60 * 60 * 1000;
+    let cleaned = 0;
+    for (const [sessionId, activity] of userActivity) {
+        if (now - activity.lastSeen > staleTimeout) {
+            userActivity.delete(sessionId);
+            cleaned++;
+        }
+    }
+    if (cleaned > 0) console.log(`[Analytics Cleanup] Removed ${cleaned} stale activity entries`);
+}
 
 // Fallback model chain if primary model is unavailable
 const MODEL_FALLBACKS = {
@@ -1726,6 +2549,15 @@ app.post('/api/chat', upload.array('files', 10), async (req, res) => {
             return res.status(400).json({ error: 'Message or files required' });
         }
 
+        // Track user activity for analytics
+        if (sessionId) {
+            if (files && files.length > 0) {
+                trackUserActivity(sessionId, 'upload');
+            } else {
+                trackUserActivity(sessionId, 'message');
+            }
+        }
+
         // Detect ambiguity first
         const ambiguityResult = detectAmbiguity(message);
         if (ambiguityResult.isAmbiguous && ambiguityResult.clarifications.length > 0) {
@@ -1985,6 +2817,11 @@ if (!process.env.VERCEL && !process.env.VERCEL_ENV) {
         }
         if (cleaned > 0) console.log(`[Memory Cleanup] Removed ${cleaned} expired memory entries. Active sessions: ${CONVERSATION_MEMORY.size}`);
     }, 15 * 60 * 1000); // every 15 minutes
+
+    // Schedule analytics cleanup (every 30 minutes)
+    setInterval(() => {
+        cleanupStaleActivity();
+    }, 30 * 60 * 1000);
 
     startServer(app, port);
 }
