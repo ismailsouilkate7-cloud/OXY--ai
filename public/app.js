@@ -190,11 +190,9 @@ shareBtn.addEventListener('click', () => {
 });
 
 // === MARKED CONFIGURATION ===
-marked.setOptions({
-    highlight: function(code, lang) {
-        const language = hljs.getLanguage(lang) ? lang : 'plaintext';
-        return hljs.highlight(code, { language }).value;
-    },
+// Use marked's modern extension API for syntax highlighting
+// (setOptions highlight callback was removed in marked v5+)
+marked.use({
     langPrefix: 'hljs language-',
     breaks: true
 });
@@ -1022,7 +1020,13 @@ function renderHistory() {
     messagesWrapper.innerHTML = '';
     welcomeScreen.style.display = currentChatHistory.length === 0 ? 'flex' : 'none';
     currentChatHistory.forEach(msg => {
-        appendMessage(msg.text, msg.sender, true, msg.files);
+        const msgDiv = appendMessage(msg.text, msg.sender, true, msg.files);
+        // Process images for bot messages when loading from history
+        if (msg.sender === 'bot' && msg.text && window.OXIImageAssistant && !msg.text.startsWith('⚠️') && !msg.text.startsWith('❌')) {
+            setTimeout(() => {
+                window.OXIImageAssistant.processMessage(msgDiv, msg.text);
+            }, 500);
+        }
     });
     chatContainer.scrollTop = chatContainer.scrollHeight;
 }
@@ -1168,22 +1172,29 @@ async function sendMessage(text, files, isRegenerate = false) {
             fullResponse = 'Network error';
         }
     } finally {
-        isGenerating = false;
-        stopBtn.style.display = 'none';
-        regenBtn.style.display = 'flex';
-        if (fullResponse) {
-            // Check if the final response is a widget (JSON)
-            const widgetResult = OXYWidgetRenderer.detectAndRender(fullResponse);
-            if (widgetResult) {
-                contentDiv.innerHTML = `<div class="oxy-widget-container">${widgetResult.html}</div>`;
-            } else {
-                const rawHtml = marked.parse(fullResponse);
-                contentDiv.innerHTML = DOMPurify.sanitize(rawHtml);
-                formatCodeBlocks(contentDiv);
+            isGenerating = false;
+            stopBtn.style.display = 'none';
+            regenBtn.style.display = 'flex';
+            if (fullResponse) {
+                // Check if the final response is a widget (JSON)
+                const widgetResult = OXYWidgetRenderer.detectAndRender(fullResponse);
+                if (widgetResult) {
+                    contentDiv.innerHTML = `<div class="oxy-widget-container">${widgetResult.html}</div>`;
+                } else {
+                    const rawHtml = marked.parse(fullResponse);
+                    contentDiv.innerHTML = DOMPurify.sanitize(rawHtml);
+                    formatCodeBlocks(contentDiv);
+                }
+
+                // Auto-trigger rich image response for visual topics
+                if (window.OXIImageAssistant && !fullResponse.startsWith('⚠️') && !fullResponse.startsWith('❌')) {
+                    setTimeout(() => {
+                        window.OXIImageAssistant.processMessage(botMsgDiv, fullResponse);
+                    }, 300);
+                }
             }
+            chatContainer.scrollTop = chatContainer.scrollHeight;
         }
-        chatContainer.scrollTop = chatContainer.scrollHeight;
-    }
 }
 
 // === STOP / REGEN ===
@@ -1232,10 +1243,13 @@ window.copyCode = function(btn) {
     const wrapper = btn.closest('.code-block-wrapper');
     const code = wrapper.querySelector('code').innerText;
     navigator.clipboard.writeText(code).then(() => {
+        btn.classList.add('copied');
         const originalHtml = btn.innerHTML;
-        btn.innerHTML = '<i class="fa-solid fa-check"></i> Copied!';
-        btn.style.color = '#10b981';
-        setTimeout(() => { btn.innerHTML = originalHtml; btn.style.color = ''; }, 2000);
+        btn.innerHTML = '<i class="fa-regular fa-clipboard"></i> Copied!';
+        setTimeout(() => { 
+            btn.classList.remove('copied');
+            btn.innerHTML = originalHtml; 
+        }, 2000);
     });
 };
 
@@ -1341,13 +1355,46 @@ function formatCodeBlocks(container) {
     const blocks = container.querySelectorAll('pre code');
     blocks.forEach((block) => {
         const pre = block.parentElement;
+        
+        // STEP 1: Run Highlight.js syntax highlighting on the code block
+        // Skip if already highlighted (hljs adds the 'hljs' class after highlighting)
+        if (!block.classList.contains('hljs')) {
+            // Extract language from class name (marked adds e.g., "language-javascript")
+            const langMatch = block.className.match(/language-(\w+)/);
+            const lang = langMatch ? langMatch[1] : '';
+            
+            if (lang && hljs.getLanguage(lang)) {
+                // Known language: highlight with it
+                try {
+                    block.setAttribute('data-highlighted', 'yes');
+                    hljs.highlightElement(block);
+                } catch (e) {
+                    // fallback silently
+                }
+            } else {
+                // No language or unknown: let hljs auto-detect
+                try {
+                    block.setAttribute('data-highlighted', 'yes');
+                    hljs.highlightElement(block);
+                } catch (e) {}
+            }
+        }
+        
+        // STEP 2: Wrap in code-block-wrapper with language header + copy button
         if (!pre.parentElement.classList.contains('code-block-wrapper')) {
-            const lang = block.className.replace('hljs language-', '').replace('language-', '') || 'code';
+            // Get language name for the header badge
+            const classStr = block.className
+                .replace('hljs', '')
+                .replace('language-', '')
+                .replace(/\s+/g, '')
+                .trim();
+            const lang = classStr || 'code';
+            
             const wrapper = document.createElement('div');
             wrapper.className = 'code-block-wrapper';
             const header = document.createElement('div');
             header.className = 'code-header';
-            header.innerHTML = `<span>${lang}</span><button class="copy-btn" onclick="copyCode(this)"><i class="fa-regular fa-copy"></i> Copy</button>`;
+            header.innerHTML = `<span>${lang}</span><button class="copy-btn" onclick="copyCode(this)"><i class="fa-regular fa-clipboard"></i> Copy</button>`;
             pre.parentNode.insertBefore(wrapper, pre);
             wrapper.appendChild(header);
             wrapper.appendChild(pre);

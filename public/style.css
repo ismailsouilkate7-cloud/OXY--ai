@@ -348,7 +348,7 @@ body {
 .header-actions {
     display: flex;
     align-items: center;
-    gap: 15px;
+    gap: 8px;
     margin-left: auto;
 }
 
@@ -524,23 +524,36 @@ body {
 .message-content p { margin-bottom: 10px; }
 .message-content p:last-child { margin-bottom: 0; }
 .message-content pre {
-    background-color: #1a1a1a;
-    border-radius: 8px;
-    padding: 12px;
     margin: 10px 0;
     overflow-x: auto;
-    border: 1px solid #4a4a4a;
 }
 .message-content code {
-    font-family: monospace;
-    background-color: rgba(255, 255, 255, 0.1);
-    padding: 2px 4px;
+    font-family: 'JetBrains Mono', 'Consolas', 'SF Mono', 'Monaco', 'Andale Mono', 'Ubuntu Mono', monospace;
+    font-size: 13px;
+    line-height: 1.5;
+}
+/* Inline code — distinct from code blocks */
+.message-content p > code,
+.message-content li > code,
+.message-content td > code,
+.message-content h1 > code,
+.message-content h2 > code,
+.message-content h3 > code,
+.message-content h4 > code {
+    background-color: rgba(110, 118, 135, 0.15);
+    color: #e879f9;
+    padding: 2px 7px;
     border-radius: 4px;
-    font-size: 14px;
+    font-size: 0.9em;
+    border: 1px solid rgba(110, 118, 135, 0.2);
+    white-space: nowrap;
 }
 .message-content pre code {
     background-color: transparent;
     padding: 0;
+    border: none;
+    white-space: pre;
+    color: inherit;
 }
 
 .input-area {
@@ -786,46 +799,305 @@ textarea::placeholder {
     color: var(--accent-color);
 }
 
-/* Code Block Enhancements */
+/* ==============================================
+   CODE BLOCKS — ChatGPT-Style Beautiful Syntax
+   ============================================== */
 .code-block-wrapper {
     position: relative;
-    margin: 15px 0;
-    border-radius: 8px;
+    margin: 16px 0;
+    border-radius: 12px;
     overflow: hidden;
+    background: #0d1117;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+    transition: border-color 0.2s ease;
 }
 
+.code-block-wrapper:hover {
+    border-color: rgba(255, 255, 255, 0.12);
+}
+
+/* Language header bar */
 .code-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background-color: #3a3a3a;
-    padding: 8px 15px;
+    background: #151b22;
+    padding: 10px 16px;
     font-size: 12px;
-    color: var(--text-secondary);
-    border-bottom: 1px solid #2a2a2a;
+    color: rgba(255, 255, 255, 0.5);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    user-select: none;
+    font-weight: 500;
+    letter-spacing: 0.3px;
+    text-transform: lowercase;
 }
 
-.copy-btn {
-    background: none;
-    border: none;
-    color: var(--text-secondary);
-    cursor: pointer;
+/* Language icon dot */
+.code-header .lang-dot {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 8px;
+    vertical-align: middle;
+}
+
+.code-header .lang-name {
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: 6px;
+}
+
+.code-header .lang-name::before {
+    content: '';
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: currentColor;
+    opacity: 0.5;
+}
+
+/* Copy button — top-right, always visible */
+.copy-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.5);
+    cursor: pointer;
     font-family: inherit;
-    font-size: 12px;
-    transition: color 0.2s;
+    font-size: 11px;
+    font-weight: 500;
+    padding: 5px 12px;
+    border-radius: 6px;
+    transition: all 0.2s ease;
+    letter-spacing: 0.2px;
 }
 
 .copy-btn:hover {
-    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.85);
+    border-color: rgba(255, 255, 255, 0.15);
 }
 
+.copy-btn:active {
+    transform: scale(0.96);
+}
+
+.copy-btn i {
+    font-size: 13px;
+}
+
+/* Copied state */
+.copy-btn.copied {
+    color: #7ee787;
+    border-color: rgba(126, 231, 135, 0.3);
+    background: rgba(126, 231, 135, 0.1);
+}
+
+/* Code block pre element */
 .message-content pre {
     margin: 0 !important;
-    border-radius: 0 0 8px 8px !important;
+    padding: 18px 20px !important;
+    background: #0d1117 !important;
+    border-radius: 0 0 12px 12px !important;
     border: none !important;
+    overflow-x: auto;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.1) transparent;
+}
+
+.message-content pre::-webkit-scrollbar {
+    height: 6px;
+}
+
+.message-content pre::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.message-content pre::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 3px;
+}
+
+.message-content pre::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.15);
+}
+
+/* Code element inside pre — Highlight.js applies hljs classes */
+.message-content pre code {
+    font-family: 'JetBrains Mono', 'Consolas', 'SF Mono', 'Monaco', 'Andale Mono', 'Ubuntu Mono', monospace !important;
+    font-size: 13.5px !important;
+    line-height: 1.6 !important;
+    tab-size: 2;
+    -moz-tab-size: 2;
+    background: transparent !important;
+    padding: 0 !important;
+    border: none !important;
+    white-space: pre !important;
+    color: #e6edf3 !important;
+}
+
+/* Line number style (adds visual structure) */
+.message-content pre code .hljs-ln-numbers {
+    color: rgba(255, 255, 255, 0.15);
+    text-align: right;
+    padding-right: 16px;
+    user-select: none;
+}
+
+/* ==============================================
+   HIGHLIGHT.JS — GitHub Dark Theme Colors
+   ============================================== */
+.message-content .hljs {
+    color: #e6edf3;
+    background: transparent;
+}
+
+.message-content .hljs-keyword,
+.message-content .hljs-selector-tag,
+.message-content .hljs-literal,
+.message-content .hljs-section,
+.message-content .hljs-link {
+    color: #ff7b72;
+}
+
+.message-content .hljs-function .hljs-keyword {
+    color: #ff7b72;
+}
+
+.message-content .hljs-built_in {
+    color: #d2a8ff;
+}
+
+.message-content .hljs-type,
+.message-content .hljs-class .hljs-title,
+.message-content .hljs-title.class_,
+.message-content .hljs-title.class_.inherited__ {
+    color: #ffa657;
+}
+
+.message-content .hljs-attr,
+.message-content .hljs-attribute {
+    color: #79c0ff;
+}
+
+.message-content .hljs-number,
+.message-content .hljs-selector-attr,
+.message-content .hljs-selector-pseudo {
+    color: #79c0ff;
+}
+
+.message-content .hljs-string,
+.message-content .hljs-regexp,
+.message-content .hljs-addition {
+    color: #a5d6ff;
+}
+
+.message-content .hljs-variable,
+.message-content .hljs-template-variable {
+    color: #ffa657;
+}
+
+.message-content .hljs-comment,
+.message-content .hljs-quote,
+.message-content .hljs-deletion {
+    color: #8b949e;
+    font-style: italic;
+}
+
+.message-content .hljs-meta {
+    color: #79c0ff;
+}
+
+.message-content .hljs-tag {
+    color: #ff7b72;
+}
+
+.message-content .hljs-name {
+    color: #ff7b72;
+}
+
+.message-content .hljs-selector-id,
+.message-content .hljs-selector-class {
+    color: #d2a8ff;
+}
+
+.message-content .hljs-title,
+.message-content .hljs-title.function_ {
+    color: #d2a8ff;
+}
+
+.message-content .hljs-params {
+    color: #e6edf3;
+}
+
+.message-content .hljs-bullet {
+    color: #d2a8ff;
+}
+
+.message-content .hljs-symbol {
+    color: #f0883e;
+}
+
+.message-content .hljs-prompt {
+    color: #8b949e;
+}
+
+.message-content .hljs-subst {
+    color: #e6edf3;
+}
+
+.message-content .hljs-doctag {
+    color: #ff7b72;
+}
+
+.message-content .hljs-meta .hljs-keyword {
+    color: #ff7b72;
+}
+
+.message-content .hljs-meta .hljs-string {
+    color: #a5d6ff;
+}
+
+/* JSON specific */
+.message-content .hljs-attr {
+    color: #79c0ff;
+}
+
+/* CSS specific */
+.message-content .hljs-selector-pseudo {
+    color: #d2a8ff;
+}
+
+.message-content .hljs-selector-class {
+    color: #ffa657;
+}
+
+.message-content .hljs-selector-id {
+    color: #ffa657;
+}
+
+.message-content .hljs-property {
+    color: #79c0ff;
+}
+
+.message-content .hljs-unit {
+    color: #79c0ff;
+}
+
+/* Formula / Markup specific */
+.message-content .hljs-formula {
+    color: #e6edf3;
+}
+
+/* Python decorator */
+.message-content .hljs-decorator,
+.message-content .hljs-decorator .hljs-keyword {
+    color: #d2a8ff;
 }
 
 /* ChatGPT Message Flow adjustments */
@@ -3220,5 +3492,441 @@ textarea::placeholder {
         width: 28px;
         height: 28px;
         font-size: 12px;
+    }
+}
+
+/* ============================================================
+   Rich Image Response — Image Carousel & Components
+   ============================================================ */
+
+/* --- Assistant Images Section --- */
+.oxy-assistant-images {
+    margin-top: 16px;
+    width: 100%;
+    max-width: 100%;
+}
+
+.oxy-images-label {
+    font-size: 12px;
+    font-weight: 500;
+    color: var(--text-secondary, #a0a5b1);
+    margin-bottom: 10px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    letter-spacing: 0.3px;
+}
+
+.oxy-images-label i {
+    font-size: 11px;
+    opacity: 0.7;
+}
+
+/* --- Image Carousel --- */
+.oxy-image-carousel {
+    position: relative;
+    width: 100%;
+    margin-bottom: 8px;
+}
+
+.oxy-carousel-track {
+    display: flex;
+    gap: 12px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    scroll-behavior: smooth;
+    -webkit-overflow-scrolling: touch;
+    padding: 4px 0 12px;
+    scrollbar-width: none;
+}
+
+.oxy-carousel-track::-webkit-scrollbar {
+    display: none;
+}
+
+/* --- Image Card --- */
+.oxy-image-card {
+    flex: 0 0 auto;
+    width: 180px;
+    height: 180px;
+    border-radius: 12px;
+    overflow: hidden;
+    position: relative;
+    background: var(--bg-tertiary, #2a2a2a);
+    scroll-snap-align: start;
+    cursor: pointer;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+    border: 1px solid var(--border-color, #3a3a3a);
+}
+
+.oxy-image-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+}
+
+.oxy-image-card.loaded {
+    background: transparent;
+}
+
+.oxy-image-card-img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+    transition: opacity 0.3s ease;
+}
+
+/* --- Skeleton Loader --- */
+.oxy-image-skeleton {
+    position: absolute;
+    inset: 0;
+    background: var(--bg-tertiary, #2a2a2a);
+    overflow: hidden;
+    z-index: 1;
+}
+
+.skeleton-shimmer {
+    width: 100%;
+    height: 100%;
+    background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(255, 255, 255, 0.06) 50%,
+        transparent 100%
+    );
+    animation: shimmer 1.5s infinite;
+}
+
+@keyframes shimmer {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
+}
+
+/* --- Credit & Provider Badges --- */
+.oxy-image-credit {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 6px 8px;
+    background: linear-gradient(transparent, rgba(0, 0, 0, 0.7));
+    color: #fff;
+    font-size: 10px;
+    font-weight: 400;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+}
+
+.oxy-image-card:hover .oxy-image-credit {
+    opacity: 1;
+}
+
+.oxy-image-provider {
+    position: absolute;
+    top: 6px;
+    right: 6px;
+    padding: 2px 6px;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(4px);
+    border-radius: 4px;
+    color: #fff;
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    pointer-events: none;
+}
+
+.oxy-image-card:hover .oxy-image-provider {
+    opacity: 1;
+}
+
+/* --- Error Placeholder --- */
+.oxy-image-error-placeholder {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-secondary, #a0a5b1);
+    font-size: 28px;
+    background: var(--bg-tertiary, #2a2a2a);
+}
+
+/* --- Carousel Dots --- */
+.oxy-carousel-dots {
+    display: flex;
+    justify-content: center;
+    gap: 6px;
+    padding: 4px 0;
+}
+
+.oxy-carousel-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    border: none;
+    background: var(--border-color, #3a3a3a);
+    cursor: pointer;
+    padding: 0;
+    transition: background 0.2s ease, width 0.2s ease;
+}
+
+.oxy-carousel-dot.active {
+    background: var(--accent-color, #6366f1);
+    width: 18px;
+    border-radius: 3px;
+}
+
+.oxy-carousel-dot:hover {
+    background: var(--text-secondary, #a0a5b1);
+}
+
+/* --- Featured (16:9) Row --- */
+.oxy-images-featured {
+    margin-top: 4px;
+}
+
+.oxy-images-featured .oxy-image-card {
+    width: 240px;
+    height: 135px;
+}
+
+/* --- Loading Row (Skeleton) --- */
+.oxy-image-loading-row {
+    display: flex;
+    gap: 12px;
+    padding: 4px 0;
+    overflow: hidden;
+}
+
+.oxy-image-loading-card {
+    flex: 0 0 auto;
+    width: 180px;
+    height: 180px;
+    border-radius: 12px;
+    background: var(--bg-tertiary, #2a2a2a);
+    overflow: hidden;
+    position: relative;
+}
+
+.oxy-image-loading-card .skeleton-shimmer {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(
+        90deg,
+        transparent 0%,
+        rgba(255, 255, 255, 0.06) 50%,
+        transparent 100%
+    );
+    animation: shimmer 1.5s infinite;
+}
+
+/* --- Fullscreen Image Modal --- */
+.oxy-image-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 10000;
+    background: rgba(0, 0, 0, 0.92);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+}
+
+.oxy-image-modal.open {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.oxy-modal-close {
+    position: absolute;
+    top: 16px;
+    right: 16px;
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    font-size: 22px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s ease;
+    z-index: 10;
+}
+
+.oxy-modal-close:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.oxy-modal-prev,
+.oxy-modal-next {
+    position: absolute;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 44px;
+    height: 44px;
+    border-radius: 50%;
+    border: none;
+    background: rgba(255, 255, 255, 0.1);
+    color: #fff;
+    font-size: 20px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.2s ease;
+    z-index: 10;
+}
+
+.oxy-modal-prev { left: 16px; }
+.oxy-modal-next { right: 16px; }
+
+.oxy-modal-prev:hover,
+.oxy-modal-next:hover {
+    background: rgba(255, 255, 255, 0.2);
+}
+
+.oxy-modal-image-wrap {
+    position: relative;
+    max-width: 90vw;
+    max-height: 85vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.oxy-modal-image {
+    max-width: 90vw;
+    max-height: 85vh;
+    object-fit: contain;
+    border-radius: 8px;
+    transition: opacity 0.2s ease;
+    box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+}
+
+.oxy-modal-loader {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.oxy-modal-spinner {
+    width: 36px;
+    height: 36px;
+    border: 3px solid rgba(255, 255, 255, 0.15);
+    border-top-color: #fff;
+    border-radius: 50%;
+    animation: oxySpin 0.7s linear infinite;
+}
+
+@keyframes oxySpin {
+    to { transform: rotate(360deg); }
+}
+
+.oxy-modal-info {
+    position: absolute;
+    bottom: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(8px);
+    padding: 8px 18px;
+    border-radius: 20px;
+    color: #fff;
+    font-size: 13px;
+}
+
+.oxy-modal-counter {
+    font-weight: 500;
+    letter-spacing: 0.5px;
+}
+
+.oxy-modal-download {
+    color: #fff;
+    text-decoration: none;
+    font-size: 16px;
+    display: flex;
+    align-items: center;
+    padding: 4px;
+    transition: color 0.2s ease;
+}
+
+.oxy-modal-download:hover {
+    color: var(--accent-color, #6366f1);
+}
+
+/* --- Responsive --- */
+@media (max-width: 768px) {
+    .oxy-image-card {
+        width: 140px;
+        height: 140px;
+    }
+
+    .oxy-images-featured .oxy-image-card {
+        width: 200px;
+        height: 112.5px;
+    }
+
+    .oxy-image-loading-card {
+        width: 140px;
+        height: 140px;
+    }
+
+    .oxy-modal-prev,
+    .oxy-modal-next {
+        width: 36px;
+        height: 36px;
+        font-size: 16px;
+    }
+
+    .oxy-modal-prev { left: 8px; }
+    .oxy-modal-next { right: 8px; }
+
+    .oxy-modal-close {
+        width: 34px;
+        height: 34px;
+        font-size: 18px;
+        top: 10px;
+        right: 10px;
+    }
+}
+
+@media (max-width: 480px) {
+    .oxy-image-card {
+        width: 120px;
+        height: 120px;
+    }
+
+    .oxy-images-featured .oxy-image-card {
+        width: 170px;
+        height: 95.6px;
+    }
+
+    .oxy-image-loading-card {
+        width: 120px;
+        height: 120px;
+    }
+
+    .oxy-carousel-track {
+        gap: 8px;
     }
 }

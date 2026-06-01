@@ -2534,6 +2534,192 @@ function formatSearchResultsForAI(results) {
     return `\n\n--- Web Search Results ---\n${formatted}\n--- End of Search Results ---\n`;
 }
 
+// ============================================================
+// IMAGE SEARCH API — Multi-provider with fallback
+// ============================================================
+
+// API key detection
+const UNSPLASH_ACCESS_KEY = process.env.UNSPLASH_ACCESS_KEY || '';
+const PEXELS_API_KEY = process.env.PEXELS_API_KEY || '';
+const PIXABAY_API_KEY = process.env.PIXABAY_API_KEY || '';
+
+const hasUnsplash = UNSPLASH_ACCESS_KEY.length > 0;
+const hasPexels = PEXELS_API_KEY.length > 0;
+const hasPixabay = PIXABAY_API_KEY.length > 0;
+
+if (!hasUnsplash && !hasPexels && !hasPixabay) {
+    console.warn('[Image Search] ⚠️ No image API keys configured. Image search will be disabled.');
+    console.warn('[Image Search]   Set UNSPLASH_ACCESS_KEY, PEXELS_API_KEY, or PIXABAY_API_KEY in .env');
+} else {
+    const providers = [];
+    if (hasUnsplash) providers.push('Unsplash');
+    if (hasPexels) providers.push('Pexels');
+    if (hasPixabay) providers.push('Pixabay');
+    console.log(`[Image Search] ✅ Providers configured: ${providers.join(', ')}`);
+}
+
+async function searchUnsplash(query, count = 6) {
+    if (!hasUnsplash) return null;
+    try {
+        const url = new URL('https://api.unsplash.com/search/photos');
+        url.searchParams.set('query', query);
+        url.searchParams.set('per_page', Math.min(count, 30));
+        url.searchParams.set('orientation', 'landscape');
+
+        const response = await fetch(url.toString(), {
+            headers: {
+                'Authorization': `Client-ID ${UNSPLASH_ACCESS_KEY}`,
+                'Accept-Version': 'v1'
+            }
+        });
+
+        if (!response.ok) {
+            console.warn(`[Unsplash] API error: ${response.status}`);
+            return null;
+        }
+
+        const data = await response.json();
+        return (data.results || []).map(img => ({
+            id: img.id,
+            url: img.urls?.regular || img.urls?.small,
+            downloadUrl: img.links?.download || img.urls?.full,
+            alt: img.alt_description || img.description || '',
+            credit: img.user?.name ? `Photo by ${img.user.name}` : '',
+            provider: 'unsplash',
+            width: img.width,
+            height: img.height,
+            description: img.alt_description || ''
+        })).filter(img => img.url);
+    } catch (err) {
+        console.warn('[Unsplash] Error:', err.message);
+        return null;
+    }
+}
+
+async function searchPexels(query, count = 6) {
+    if (!hasPexels) return null;
+    try {
+        const url = new URL('https://api.pexels.com/v1/search');
+        url.searchParams.set('query', query);
+        url.searchParams.set('per_page', Math.min(count, 80));
+
+        const response = await fetch(url.toString(), {
+            headers: {
+                'Authorization': PEXELS_API_KEY
+            }
+        });
+
+        if (!response.ok) {
+            console.warn(`[Pexels] API error: ${response.status}`);
+            return null;
+        }
+
+        const data = await response.json();
+        return (data.photos || []).map(img => ({
+            id: String(img.id),
+            url: img.src?.medium || img.src?.small,
+            downloadUrl: img.src?.original || img.url,
+            alt: img.alt || '',
+            credit: img.photographer ? `Photo by ${img.photographer}` : '',
+            provider: 'pexels',
+            width: img.width,
+            height: img.height,
+            description: img.alt || ''
+        })).filter(img => img.url);
+    } catch (err) {
+        console.warn('[Pexels] Error:', err.message);
+        return null;
+    }
+}
+
+async function searchPixabay(query, count = 6) {
+    if (!hasPixabay) return null;
+    try {
+        const url = new URL('https://pixabay.com/api/');
+        url.searchParams.set('key', PIXABAY_API_KEY);
+        url.searchParams.set('q', query);
+        url.searchParams.set('per_page', Math.min(count, 200));
+        url.searchParams.set('image_type', 'photo');
+        url.searchParams.set('safesearch', 'true');
+
+        const response = await fetch(url.toString());
+
+        if (!response.ok) {
+            console.warn(`[Pixabay] API error: ${response.status}`);
+            return null;
+        }
+
+        const data = await response.json();
+        return (data.hits || []).map(img => ({
+            id: String(img.id),
+            url: img.webformatURL || img.previewURL,
+            downloadUrl: img.largeImageURL || img.fullHDURL,
+            alt: img.tags || '',
+            credit: img.user ? `Photo by ${img.user}` : '',
+            provider: 'pixabay',
+            width: img.imageWidth,
+            height: img.imageHeight,
+            description: img.tags || ''
+        })).filter(img => img.url);
+    } catch (err) {
+        console.warn('[Pixabay] Error:', err.message);
+        return null;
+    }
+}
+
+// POST /api/images/search — search images with provider fallback
+app.post('/api/images/search', async (req, res) => {
+    try {
+        const { query, count = 6 } = req.body;
+
+        if (!query || typeof query !== 'string') {
+            return res.status(400).json({ error: 'Search query is required' });
+        }
+
+        if (!hasUnsplash && !hasPexels && !hasPixabay) {
+            return res.status(503).json({ error: 'No image API keys configured' });
+        }
+
+        console.log(`[Image Search] Searching for: "${query}"`);
+
+        // Try providers in order: Unsplash -> Pexels -> Pixabay
+        const providers = [
+            { name: 'Unsplash', fn: () => searchUnsplash(query, count) },
+            { name: 'Pexels', fn: () => searchPexels(query, count) },
+            { name: 'Pixabay', fn: () => searchPixabay(query, count) },
+        ];
+
+        let images = [];
+        let usedProvider = '';
+
+        for (const provider of providers) {
+            const result = await provider.fn();
+            if (result && result.length > 0) {
+                images = result;
+                usedProvider = provider.name;
+                console.log(`[Image Search] ✅ ${provider.name} returned ${result.length} images`);
+                break;
+            }
+        }
+
+        if (images.length === 0) {
+            return res.json({ images: [], provider: 'none' });
+        }
+
+        // Shuffle results for variety
+        for (let i = images.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [images[i], images[j]] = [images[j], images[i]];
+        }
+
+        res.json({ images: images.slice(0, count), provider: usedProvider });
+
+    } catch (error) {
+        console.error('[Image Search] Endpoint error:', error.message);
+        res.status(500).json({ error: 'Image search failed' });
+    }
+});
+
 app.post('/api/chat', upload.array('files', 10), async (req, res) => {
     try {
         let message = req.body.message || '';
