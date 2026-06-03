@@ -3,8 +3,10 @@
   "short_name": "OXY AI",
   "description": "Your intelligent, natural conversational assistant with multimodal capabilities.",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
-  "background_color": "#000000",
+  "orientation": "portrait",
+  "background_color": "#FFFFFF",
   "theme_color": "#000000",
   "icons": [
     {

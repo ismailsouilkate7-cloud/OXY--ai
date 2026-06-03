@@ -1,4 +1,5 @@
-const CACHE_NAME = 'oxy-ai-cache-v1';
+// Bump cache version when icon files change so the SW refreshes them
+const CACHE_NAME = 'oxy-ai-cache-v2';
 const ASSETS_TO_CACHE = [
     '/',
     '/index.html',
@@ -7,7 +8,11 @@ const ASSETS_TO_CACHE = [
     '/pdf-viewer.js',
     '/widget-renderer.js',
     '/manifest.json',
+    // New PWA icon set
     '/apple-touch-icon.png',
+    '/icons/icon-192.png',
+    '/icons/icon-512.png',
+    '/icons/maskable-icon-512.png',
     '/logo.svg'
 ];
 
@@ -27,7 +32,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
     // Tell the active service worker to take control of the page immediately
     self.clients.claim();
-    
+
     // Automatically clear old caches
     event.waitUntil(
         caches.keys().then((cacheNames) => {
@@ -46,7 +51,7 @@ self.addEventListener('activate', (event) => {
 self.addEventListener('fetch', (event) => {
     // Only intercept GET requests
     if (event.request.method !== 'GET') return;
-    
+
     const url = new URL(event.request.url);
     // Ignore API and Admin requests completely
     if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/admin/')) return;

@@ -3,8 +3,7 @@
   "functions": {
     "server.js": {
       "memory": 1024,
-      "maxDuration": 60,
-      "supportsResponseStreaming": true
+      "maxDuration": 60
     }
   },
   "rewrites": [
