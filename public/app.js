@@ -1185,9 +1185,18 @@ async function sendMessage(text, files, isRegenerate = false) {
             saveSession();
             fullResponse = stoppedMsg;
         } else {
-            contentDiv.innerHTML = '<span style="color: #ef4444;">❌ Network error. Please try again.</span>';
+            if (fullResponse) {
+                const interruptedMsg = fullResponse + '\n\n*(Connection lost)*';
+                contentDiv.innerHTML = DOMPurify.sanitize(marked.parse(interruptedMsg));
+                formatCodeBlocks(contentDiv);
+                currentChatHistory.push({ text: interruptedMsg, sender: 'bot' });
+                saveSession();
+                fullResponse = interruptedMsg;
+            } else {
+                contentDiv.innerHTML = '<span style="color: #ef4444;">❌ Network error. Please try again.</span>';
+                fullResponse = 'Network error';
+            }
             console.error('Chat error:', error);
-            fullResponse = 'Network error';
         }
     } finally {
             isGenerating = false;
