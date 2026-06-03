@@ -100,7 +100,7 @@ let abortController = null;
 let isGenerating = false;
 let isUploading = false;
 let currentChatHistory = [];
-let userName = localStorage.getItem('oxy_user_name') || 'Ismail Souilkte';
+let userName = localStorage.getItem('oxy_user_name') || 'user-(set your name in settings)';
 let userGender = localStorage.getItem('oxy_user_gender') || 'Prefer not to say';
 let pendingFiles = []; // { id, file, preview, name, size, type }
 let cameraStream = null;
@@ -1503,5 +1503,4 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
 } else {
     document.addEventListener('DOMContentLoaded', initApp);
 }
-
 
