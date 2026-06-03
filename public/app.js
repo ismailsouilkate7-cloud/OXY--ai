@@ -23,7 +23,8 @@ let userLocation = localStorage.getItem('oxy_user_location') || null;
 
 async function fetchUserLocation() {
     try {
-        const response = await fetch('https://ipapi.co/json/');
+        // Use the server-side proxy to avoid CORS errors
+        const response = await fetch('/api/location');
         const data = await response.json();
         const location = `${data.city || ''}, ${data.region || ''} ${data.country_name || ''}`.replace(/,\s*$/, '').trim();
         return location || null;
@@ -273,7 +274,7 @@ function loadSession(id) {
         renderHistory();
         loadSessionsList();
         regenBtn.style.display = currentChatHistory.length > 0 && currentChatHistory[currentChatHistory.length-1]?.sender === 'bot' ? 'flex' : 'none';
-        if (window.innerWidth <= 768) closeSidebar();
+        if (window.innerWidth <= 1024) closeSidebar();
     }
 }
 
@@ -313,7 +314,7 @@ clearChatBtn.addEventListener('click', () => {
 const sidebarOverlay = document.getElementById('sidebar-overlay');
 
 function openSidebar() {
-    if (window.innerWidth <= 768) {
+    if (window.innerWidth <= 1024) {
         sidebar.classList.add('open');
         sidebarOverlay.classList.add('active');
     } else {
@@ -321,7 +322,7 @@ function openSidebar() {
     }
 }
 function closeSidebar() {
-    if (window.innerWidth <= 768) {
+    if (window.innerWidth <= 1024) {
         sidebar.classList.remove('open');
         sidebarOverlay.classList.remove('active');
     } else {
@@ -329,7 +330,7 @@ function closeSidebar() {
     }
 }
 function isSidebarOpen() {
-    if (window.innerWidth <= 768) return sidebar.classList.contains('open');
+    if (window.innerWidth <= 1024) return sidebar.classList.contains('open');
     return !sidebar.classList.contains('closed');
 }
 
@@ -350,6 +351,29 @@ document.addEventListener('click', (e) => {
 });
 
 sidebarOverlay?.addEventListener('click', closeSidebar);
+
+// === RESIZE LISTENER ===
+// Sync sidebar state when crossing the tablet/desktop breakpoint
+let _lastIsTablet = null;
+window.addEventListener('resize', () => {
+    const isTablet = window.innerWidth <= 1024;
+    if (_lastIsTablet === null) { _lastIsTablet = isTablet; return; }
+    if (isTablet !== _lastIsTablet) {
+        _lastIsTablet = isTablet;
+        if (isTablet) {
+            // Switched to tablet/mobile — close the drawer
+            sidebar.classList.remove('open');
+            sidebarOverlay.classList.remove('active');
+            document.body.style.overflow = '';
+        } else {
+            // Switched to desktop — remove drawer-specific state
+            sidebar.classList.remove('open');
+            sidebarOverlay.classList.remove('active');
+            document.body.style.overflow = '';
+            sidebar.classList.remove('closed');
+        }
+    }
+});
 
 // === ATTACHMENT MENU ===
 let attachMenuOpen = false;
@@ -1021,12 +1045,6 @@ function renderHistory() {
     welcomeScreen.style.display = currentChatHistory.length === 0 ? 'flex' : 'none';
     currentChatHistory.forEach(msg => {
         const msgDiv = appendMessage(msg.text, msg.sender, true, msg.files);
-        // Process images for bot messages when loading from history
-        if (msg.sender === 'bot' && msg.text && window.OXIImageAssistant && !msg.text.startsWith('⚠️') && !msg.text.startsWith('❌')) {
-            setTimeout(() => {
-                window.OXIImageAssistant.processMessage(msgDiv, msg.text);
-            }, 500);
-        }
     });
     chatContainer.scrollTop = chatContainer.scrollHeight;
 }
@@ -1186,12 +1204,6 @@ async function sendMessage(text, files, isRegenerate = false) {
                     formatCodeBlocks(contentDiv);
                 }
 
-                // Auto-trigger rich image response for visual topics
-                if (window.OXIImageAssistant && !fullResponse.startsWith('⚠️') && !fullResponse.startsWith('❌')) {
-                    setTimeout(() => {
-                        window.OXIImageAssistant.processMessage(botMsgDiv, fullResponse);
-                    }, 300);
-                }
             }
             chatContainer.scrollTop = chatContainer.scrollHeight;
         }
@@ -1402,21 +1414,96 @@ function formatCodeBlocks(container) {
     });
 }
 
-// === SERVICE WORKER (PWA) ===
+// === SERVICE WORKER (PWA) — UNREGISTERED ===
+// We previously registered /service-worker.js with a cache-first
+// strategy. That strategy served STALE app.js / style.css / index.html
+// to returning users, so a normal F5 wouldn't pick up new deployments
+// (only Ctrl+F5, which bypasses the SW, would).
+//
+// The SW provided no real benefit (no offline-first requirement, the
+// CDN assets it cached are already cached by the browser, and the API
+// routes are uncached). So we UNREGISTER it on every page load —
+// this cleans up existing SW clients and clears their caches.
+//
+// If a PWA / offline experience is added later, the SW should be
+// re-introduced with a NETWORK-FIRST strategy for app shell files.
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/service-worker.js')
-            .then(reg => console.log('ServiceWorker registered:', reg.scope))
-            .catch(err => console.log('ServiceWorker registration failed:', err));
+        navigator.serviceWorker.getRegistrations().then(registrations => {
+            if (!registrations || registrations.length === 0) return;
+            for (const reg of registrations) {
+                reg.unregister().then(unregistered => {
+                    console.log('[SW] Unregistered stale service worker');
+                    if ('caches' in window) {
+                        caches.keys().then(names => {
+                            for (const n of names) {
+                                if (n.startsWith('oxy-ai-cache') || n.startsWith('oxy-voice')) {
+                                    caches.delete(n);
+                                }
+                            }
+                        });
+                    }
+                    // If we just unregistered a SW that was controlling
+                    // this page, force one reload so the new app.js
+                    // (without the registration code) actually takes
+                    // effect. This is what fixes the lingering
+                    // "ServiceWorker registered" log on a second visit.
+                    if (unregistered && !window.__oxy_sw_reloaded_once) {
+                        window.__oxy_sw_reloaded_once = true;
+                        console.log('[SW] Forcing one reload to apply cleanup');
+                        setTimeout(() => window.location.reload(), 250);
+                    }
+                }).catch(err => console.log('[SW] Unregister failed:', err));
+            }
+        });
     });
 }
 
+// === BACKEND HEALTH CHECK ===
+// On every page load, verify the server is reachable. If not, show
+// a friendly banner with the actual port so the user knows where
+// the server should be running.
+(function checkBackendHealth() {
+    const bannerId = 'oxy-backend-banner';
+    function showBanner(message) {
+        if (document.getElementById(bannerId)) return;
+        const banner = document.createElement('div');
+        banner.id = bannerId;
+        banner.style.cssText = `
+            position: fixed; top: 0; left: 0; right: 0; z-index: 99999;
+            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+            color: #fff; padding: 12px 20px; font-family: inherit;
+            font-size: 14px; text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,0.3);
+            display: flex; align-items: center; justify-content: center; gap: 12px;
+            flex-wrap: wrap;
+        `;
+        banner.innerHTML = `<strong>⚠️ ${message}</strong>`;
+        document.body && document.body.appendChild(banner);
+    }
+    fetch('/api/health', { cache: 'no-store' })
+        .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+        .then(data => { console.log('[Health] Backend OK on port', data.port, '— uptime', data.uptime.toFixed(0) + 's'); })
+        .catch(err => {
+            const port = window.location.port || (window.location.protocol === 'https:' ? 443 : 80);
+            const host = window.location.hostname || 'localhost';
+            showBanner(`Backend not reachable at http://${host}:${port}. Run \`npm start\` in the project folder. (${err.message})`);
+        });
+})();
+
 // === INIT ===
 function initApp() {
+    console.log('[App] Initializing OXY AI...');
     updateUserUI();
     loadSessionsList();
     initLocation();
     if (!currentSessionId) createNewSession();
 }
 
-initApp();
+// Wait for DOM to be ready before running init
+if (document.readyState === 'complete' || document.readyState === 'interactive') {
+    initApp();
+} else {
+    document.addEventListener('DOMContentLoaded', initApp);
+}
+
+
