@@ -1414,46 +1414,35 @@ function formatCodeBlocks(container) {
     });
 }
 
-// === SERVICE WORKER (PWA) — UNREGISTERED ===
-// We previously registered /service-worker.js with a cache-first
-// strategy. That strategy served STALE app.js / style.css / index.html
-// to returning users, so a normal F5 wouldn't pick up new deployments
-// (only Ctrl+F5, which bypasses the SW, would).
-//
-// The SW provided no real benefit (no offline-first requirement, the
-// CDN assets it cached are already cached by the browser, and the API
-// routes are uncached). So we UNREGISTER it on every page load —
-// this cleans up existing SW clients and clears their caches.
-//
-// If a PWA / offline experience is added later, the SW should be
-// re-introduced with a NETWORK-FIRST strategy for app shell files.
+// === SERVICE WORKER (PWA) — AUTO-UPDATE SYSTEM ===
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-        navigator.serviceWorker.getRegistrations().then(registrations => {
-            if (!registrations || registrations.length === 0) return;
-            for (const reg of registrations) {
-                reg.unregister().then(unregistered => {
-                    console.log('[SW] Unregistered stale service worker');
-                    if ('caches' in window) {
-                        caches.keys().then(names => {
-                            for (const n of names) {
-                                if (n.startsWith('oxy-ai-cache') || n.startsWith('oxy-voice')) {
-                                    caches.delete(n);
-                                }
-                            }
-                        });
-                    }
-                    // If we just unregistered a SW that was controlling
-                    // this page, force one reload so the new app.js
-                    // (without the registration code) actually takes
-                    // effect. This is what fixes the lingering
-                    // "ServiceWorker registered" log on a second visit.
-                    if (unregistered && !window.__oxy_sw_reloaded_once) {
-                        window.__oxy_sw_reloaded_once = true;
-                        console.log('[SW] Forcing one reload to apply cleanup');
-                        setTimeout(() => window.location.reload(), 250);
-                    }
-                }).catch(err => console.log('[SW] Unregister failed:', err));
+        // Track if this is the first install for the current session.
+        // If the controller is null, there was no active SW controlling the page.
+        const isFirstInstall = navigator.serviceWorker.controller === null;
+
+        navigator.serviceWorker.register('/service-worker.js')
+            .then(reg => {
+                console.log('[SW] Registered with scope:', reg.scope);
+                
+                // Optional: Check for updates periodically (e.g., every hour)
+                setInterval(() => {
+                    reg.update();
+                }, 60 * 60 * 1000);
+            })
+            .catch(err => console.error('[SW] Registration failed:', err));
+
+        // When a new service worker takes over (calls clients.claim())
+        let refreshing = false;
+        navigator.serviceWorker.addEventListener('controllerchange', () => {
+            if (refreshing) return;
+            refreshing = true;
+            
+            // Only force reload if this is an update to an existing SW,
+            // not the very first time the user visits the site.
+            if (!isFirstInstall) {
+                console.log('[SW] New version activated. Reloading page for instant update...');
+                window.location.reload();
             }
         });
     });
