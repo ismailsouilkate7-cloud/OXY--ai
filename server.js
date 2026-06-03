@@ -1438,38 +1438,161 @@ class GeminiKeyManager {
 
 const keyManager = new GeminiKeyManager(API_KEYS);
 
+// ============================================================
+// RATE-LIMIT DETECTION HELPERS
+// ============================================================
+function isRateLimitError(err) {
+    if (!err) return false;
+    const status = err.status || err?.response?.status;
+    const msg = (err.message || '') + ' ' + (err?.response?.data?.error?.message || '');
+    if (status === 429) return true;
+    if (status === 503) return true;
+    return /429|QUOTA_EXCEEDED|RESOURCE_EXHAUSTED|rate[_\s-]?limit|RATE_LIMIT/i.test(msg);
+}
+
+function isTransientError(err) {
+    if (!err) return false;
+    const status = err.status || err?.response?.status;
+    return status === 429 || status === 500 || status === 502 || status === 503 || status === 504
+        || isRateLimitError(err);
+}
+
+// ============================================================
+// REQUEST QUEUE — prevents hammering the API
+// ============================================================
+const requestQueue = {
+    queue: [],
+    active: 0,
+    maxConcurrent: Math.max(2, Math.min(API_KEYS.length || 3, 6)),
+    stats: { served: 0, queued: 0, peak: 0 },
+
+    enqueue(fn) {
+        return new Promise((resolve, reject) => {
+            this.queue.push({ fn, resolve, reject, enqueuedAt: Date.now() });
+            this.stats.queued++;
+            this._process();
+        });
+    },
+
+    async _process() {
+        if (this.active >= this.maxConcurrent || this.queue.length === 0) return;
+        const job = this.queue.shift();
+        this.active++;
+        if (this.active > this.stats.peak) this.stats.peak = this.active;
+        const waited = Date.now() - job.enqueuedAt;
+        if (waited > 50) console.log(`[Queue] ⏳ Dequeued after ${waited}ms (active=${this.active}/${this.maxConcurrent}, pending=${this.queue.length})`);
+        try {
+            const result = await job.fn();
+            this.stats.served++;
+            job.resolve(result);
+        } catch (err) {
+            job.reject(err);
+        } finally {
+            this.active--;
+            setImmediate(() => this._process());
+        }
+    },
+
+    status() {
+        return { active: this.active, pending: this.queue.length, max: this.maxConcurrent, ...this.stats };
+    }
+};
+console.log(`[Queue] Initialized with maxConcurrent=${requestQueue.maxConcurrent} (one slot per key, min 2)`);
+
+// ============================================================
+// EXECUTE WITH AUTO-RETRY + EXPONENTIAL BACKOFF
+// ============================================================
+// Behaviour:
+//   1. Get next available key from keyManager (round-robin).
+//   2. If request fails with rate-limit / 429 / quota, mark key
+//      cooldown (60-120s) and IMMEDIATELY retry with next key.
+//   3. If every key is rate-limited, apply exponential backoff
+//      (1s → 2s → 4s → 8s → 16s → 30s capped) before retrying.
+//   4. Never throw a rate-limit error to the user as long as any
+//      key is potentially recoverable — keep retrying silently.
+//   5. Only throw after MAX_RETRIES so the caller can show a
+//      graceful "service busy" message instead of "rate limit".
+// ============================================================
+const MAX_RETRIES = 20;
+const MAX_BACKOFF_MS = 30000;
+
+async function executeWithRetry(params, isStream = true, opts = {}) {
+    const maxRetries = opts.maxRetries || MAX_RETRIES;
+
+    for (let attempt = 0; attempt < maxRetries; attempt++) {
+        let selectedKey, keyIndex;
+
+        // 1. Try to grab a key
+        try {
+            const selection = keyManager.getNextAvailableKey();
+            selectedKey = selection.keyInfo;
+            keyIndex = selection.index;
+        } catch (err) {
+            if (err.message === 'NO_AVAILABLE_KEYS') {
+                // All keys in cooldown. Apply exponential backoff.
+                const backoffMs = Math.min(MAX_BACKOFF_MS, 1000 * Math.pow(2, attempt));
+                const cooldownLeft = keyManager.keys.map((k, i) => {
+                    if (k.cooldown_until <= Date.now()) return null;
+                    return { i, sec: Math.ceil((k.cooldown_until - Date.now()) / 1000) };
+                }).filter(Boolean);
+                console.warn(`[AI] ⏳ All ${API_KEYS.length} keys rate-limited. Backoff: ${backoffMs}ms (cycle ${attempt + 1}/${maxRetries}). Cooldowns: ${cooldownLeft.map(c => `Key[${c.i + 1}]=${c.sec}s`).join(', ') || 'none'}`);
+
+                if (attempt >= maxRetries - 1) {
+                    const ex = new Error('All API keys exhausted after retries');
+                    ex.allKeysExhausted = true;
+                    ex.attempts = attempt + 1;
+                    throw ex;
+                }
+                await new Promise(r => setTimeout(r, backoffMs));
+                continue;
+            }
+            throw err;
+        }
+
+        // 2. Try the request with this key
+        console.log(`[AI] 🚀 Attempt ${attempt + 1}/${maxRetries} | Key[${keyIndex + 1}]/${API_KEYS.length} | Model=${params.model} | Stream=${isStream}`);
+        try {
+            const client = new GoogleGenAI({ apiKey: selectedKey.key });
+            const stream = isStream
+                ? await client.models.generateContentStream(params)
+                : await client.models.generateContent(params);
+
+            keyManager.reportSuccess(keyIndex);
+            if (attempt > 0) {
+                console.log(`[AI] ✅ Recovered after ${attempt + 1} attempts using Key[${keyIndex + 1}]`);
+            } else {
+                console.log(`[AI] ✅ Key[${keyIndex + 1}] succeeded with model ${params.model}`);
+            }
+            return { stream, model: params.model, keyIndex, attempts: attempt + 1 };
+        } catch (err) {
+            if (isRateLimitError(err)) {
+                keyManager.reportError(keyIndex, err);
+                const remaining = keyManager.keys.filter(k => k.status === 'active' || (k.cooldown_until > Date.now())).length;
+                console.warn(`[AI] 🔄 Key[${keyIndex + 1}] rate-limited (HTTP ${err.status || 429}). Switching to next key… (attempt ${attempt + 1}, ${remaining} keys still active)`);
+                continue; // no backoff between keys — keep moving
+            }
+            if (isTransientError(err)) {
+                keyManager.reportError(keyIndex, err);
+                const backoffMs = Math.min(2000, 250 * Math.pow(2, attempt));
+                console.warn(`[AI] ⚠️ Transient error on Key[${keyIndex + 1}]: ${(err.message || '').substring(0, 100)}. Retrying in ${backoffMs}ms…`);
+                await new Promise(r => setTimeout(r, backoffMs));
+                continue;
+            }
+            // Non-retryable error
+            keyManager.reportError(keyIndex, err);
+            throw err;
+        }
+    }
+
+    const ex = new Error('Max retries exceeded');
+    ex.allKeysExhausted = true;
+    ex.attempts = maxRetries;
+    throw ex;
+}
+
+// Backwards-compat alias (keeps any other call-sites working)
 async function executeWithKeyManager(params, isStream = true) {
-    let selectedKey, keyIndex;
-    try {
-        const selection = keyManager.getNextAvailableKey();
-        selectedKey = selection.keyInfo;
-        keyIndex = selection.index;
-    } catch (err) {
-        if (err.message === "NO_AVAILABLE_KEYS") {
-            const error = new Error("All API keys exhausted. No available keys.");
-            error.allKeysExhausted = true;
-            throw error;
-        }
-        throw err;
-    }
-
-    console.log(`[AI] 🚀 Request starting | Key[${keyIndex + 1}] | Model: ${params.model} | Stream: ${isStream}`);
-
-    try {
-        const client = new GoogleGenAI({ apiKey: selectedKey.key });
-        let stream;
-        if (isStream) {
-            stream = await client.models.generateContentStream(params);
-        } else {
-            stream = await client.models.generateContent(params);
-        }
-        keyManager.reportSuccess(keyIndex);
-        console.log(`[API Key] ✅ Key index ${keyIndex + 1} succeeded with model ${params.model}`);
-        return { stream, model: params.model, keyIndex };
-    } catch (err) {
-        keyManager.reportError(keyIndex, err);
-        throw err;
-    }
+    return executeWithRetry(params, isStream);
 }
 
 // ============================================================
@@ -1739,7 +1862,11 @@ app.post('/api/chat', upload.array('files', 10), async (req, res) => {
         res.setHeader('Connection', 'keep-alive');
         res.setHeader('X-Accel-Buffering', 'no');
 
-        const { stream: responseStream, model: usedModel, keyIndex } = await executeWithKeyManager({ model, contents, config: { systemInstruction: currentSystemPrompt, temperature: parseFloat(temperature) } }, true);
+        // Use the request queue to throttle concurrent calls, and the
+        // auto-retry wrapper to transparently switch keys on 429.
+        const { stream: responseStream, model: usedModel, keyIndex, attempts } = await requestQueue.enqueue(() =>
+            executeWithRetry({ model, contents, config: { systemInstruction: currentSystemPrompt, temperature: parseFloat(temperature) } }, true)
+        );
 
         let fullReply = '';
         try {
@@ -1755,14 +1882,23 @@ app.post('/api/chat', upload.array('files', 10), async (req, res) => {
         safeSseEnd(res);
 
     } catch (error) {
-        console.error('Chat Endpoint Error:', error);
+        console.error('Chat Endpoint Error:', error.message?.substring(0, 200));
         const allKeysExhausted = error.allKeysExhausted === true || (error.message && error.message.includes('All API keys exhausted'));
+
+        // User-facing message: we deliberately do NOT show "rate limit" or
+        // "429" — the retry layer already absorbed those. We only show a
+        // graceful "service busy" message when ALL retries are exhausted.
         let errorMsg;
-        if (allKeysExhausted) errorMsg = '⚠️ All API keys exhausted. Please add valid API keys in .env.';
-        else if (error.status === 503 || (error.message && error.message.includes('503'))) errorMsg = '⚠️ AI model temporarily overloaded. Try again.';
-        else if (error.status === 429 || (error.message && error.message.includes('429'))) errorMsg = '⚠️ Rate limit reached. Wait a moment.';
-        else if (error.message && (error.message.includes('QUOTA_EXCEEDED') || error.message.includes('RESOURCE_EXHAUSTED'))) errorMsg = '⚠️ Quota exceeded. Check your Gemini API limit.';
-        else errorMsg = 'An error occurred while processing your request.';
+        if (allKeysExhausted) {
+            errorMsg = '⚠️ All API keys are temporarily busy. Please try again in a moment.';
+        } else if (error.status === 503 || (error.message && error.message.includes('503'))) {
+            errorMsg = '⚠️ AI model temporarily overloaded. Please try again.';
+        } else if (isRateLimitError(error)) {
+            // Should rarely reach here (retry layer handles it) — graceful fallback.
+            errorMsg = '⚠️ Service is busy. Please try again in a moment.';
+        } else {
+            errorMsg = 'An error occurred while processing your request. Please try again.';
+        }
         if (!res.headersSent) res.status(503).json({ error: errorMsg });
         else { try { res.write(`data: ${JSON.stringify({ error: errorMsg })}\n\n`); res.end(); } catch {} }
     }

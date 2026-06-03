@@ -1,5 +1,5 @@
 // Bump cache version when icon files change so the SW refreshes them
-const CACHE_NAME = 'oxy-ai-cache-v2';
+const CACHE_NAME = 'oxy-ai-cache-v3';
 const ASSETS_TO_CACHE = [
     '/',
     '/index.html',
@@ -13,6 +13,9 @@ const ASSETS_TO_CACHE = [
     '/icons/icon-192.png',
     '/icons/icon-512.png',
     '/icons/maskable-icon-512.png',
+    // Transparent favicon (no background)
+    '/favicon.svg',
+    '/favicon.png',
     '/logo.svg'
 ];
 
