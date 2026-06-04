@@ -1,0 +1,120 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sign Up - OXY AI</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Outfit', sans-serif;
+            background: #0f0f13;
+            color: #e8e8ed;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .auth-container {
+            background: rgba(26, 26, 36, 0.8);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+            border-radius: 20px;
+            padding: 48px;
+            width: 100%;
+            max-width: 440px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.4);
+            animation: fadeIn 0.5s ease-out;
+        }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .logo { display: flex; justify-content: center; align-items: center; gap: 12px; margin-bottom: 32px; }
+        .logo-ring { width: 36px; height: 36px; border: 3px solid #a855f7; border-radius: 50%; }
+        .logo span { font-size: 28px; font-weight: 700; }
+        .logo span:first-child { color: #a855f7; }
+        .title { text-align: center; font-size: 24px; font-weight: 600; margin-bottom: 8px; }
+        .subtitle { text-align: center; color: #8a8a9a; margin-bottom: 32px; font-size: 14px; }
+        .form-group { margin-bottom: 20px; }
+        label { display: block; font-size: 13px; font-weight: 500; color: #a0a0b0; margin-bottom: 8px; }
+        input { width: 100%; padding: 14px 16px; background: #0f0f13; border: 1px solid #2a2a3a; border-radius: 12px; color: #fff; font-size: 15px; outline: none; transition: 0.2s; }
+        input:focus { border-color: #a855f7; box-shadow: 0 0 0 3px rgba(168, 85, 247, 0.1); }
+        .btn { width: 100%; padding: 14px; background: #a855f7; color: #fff; border: none; border-radius: 12px; font-size: 16px; font-weight: 600; cursor: pointer; transition: 0.2s; margin-top: 8px; }
+        .btn:hover { background: #9333ea; }
+        .btn:disabled { opacity: 0.7; cursor: not-allowed; }
+        .error { color: #f87171; background: rgba(248, 113, 113, 0.1); padding: 12px; border-radius: 8px; font-size: 13px; margin-bottom: 20px; display: none; text-align: center; }
+        .footer { text-align: center; margin-top: 24px; font-size: 14px; color: #8a8a9a; }
+        .footer a { color: #a855f7; text-decoration: none; font-weight: 500; }
+        .footer a:hover { text-decoration: underline; }
+    </style>
+</head>
+<body>
+    <div class="auth-container">
+        <div class="logo">
+            <div class="logo-ring"></div>
+            <div><span>OXY</span><span>AI</span></div>
+        </div>
+        <h1 class="title">Create an account</h1>
+        <p class="subtitle">Join OXY AI today</p>
+        
+        <div id="error-msg" class="error"></div>
+        
+        <form id="register-form">
+            <div class="form-group">
+                <label>Full Name</label>
+                <input type="text" id="name" required placeholder="John Doe">
+            </div>
+            <div class="form-group">
+                <label>Email Address</label>
+                <input type="email" id="email" required placeholder="you@example.com">
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="password" required placeholder="••••••••" minlength="6">
+            </div>
+            <button type="submit" class="btn" id="submit-btn">Sign Up</button>
+        </form>
+        
+        <div class="footer">
+            Already have an account? <a href="/login.html">Log in</a>
+        </div>
+    </div>
+
+    <script>
+        document.getElementById('register-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const name = document.getElementById('name').value;
+            const email = document.getElementById('email').value;
+            const password = document.getElementById('password').value;
+            const btn = document.getElementById('submit-btn');
+            const errorDiv = document.getElementById('error-msg');
+            
+            btn.disabled = true;
+            btn.textContent = 'Creating account...';
+            errorDiv.style.display = 'none';
+
+            try {
+                const res = await fetch('/api/auth/register', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, email, password })
+                });
+                const data = await res.json();
+                
+                if (res.ok) {
+                    window.location.href = '/';
+                } else {
+                    errorDiv.textContent = data.error || 'Registration failed';
+                    errorDiv.style.display = 'block';
+                    btn.disabled = false;
+                    btn.textContent = 'Sign Up';
+                }
+            } catch (err) {
+                errorDiv.textContent = 'Network error. Please try again.';
+                errorDiv.style.display = 'block';
+                btn.disabled = false;
+                btn.textContent = 'Sign Up';
+            }
+        });
+    </script>
+</body>
+</html>

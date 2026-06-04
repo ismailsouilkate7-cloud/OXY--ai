@@ -198,84 +198,124 @@ marked.use({
     breaks: true
 });
 
-// === SESSION MANAGEMENT ===
-function getSessions() {
-    return JSON.parse(localStorage.getItem('oxy_sessions') || '{}');
+// === AUTH & SESSION MANAGEMENT ===
+let currentUser = null;
+
+async function checkAuth() {
+    try {
+        const res = await fetch('/api/auth/me');
+        if (!res.ok) {
+            window.location.href = '/login.html';
+            return false;
+        }
+        const data = await res.json();
+        currentUser = data.user;
+        userName = currentUser.name;
+        userGender = currentUser.gender || 'Prefer not to say';
+        document.getElementById('user-name-display').textContent = userName;
+        return true;
+    } catch (err) {
+        window.location.href = '/login.html';
+        return false;
+    }
 }
 
-function saveSession() {
-    if (currentChatHistory.length === 0) return;
-    const sessions = getSessions();
-    const title = currentChatHistory[0].text?.substring(0, 30) + '...' || 'Chat';
-    sessions[currentSessionId] = {
-        title: title,
-        history: currentChatHistory,
-        updatedAt: Date.now()
-    };
-    localStorage.setItem('oxy_sessions', JSON.stringify(sessions));
-    loadSessionsList();
-}
+document.getElementById('logout-btn')?.addEventListener('click', async () => {
+    try {
+        await fetch('/api/auth/logout', { method: 'POST' });
+        window.location.href = '/login.html';
+    } catch (err) {
+        console.error('Logout failed', err);
+    }
+});
 
-function loadSessionsList() {
-    const sessions = getSessions();
-    chatList.innerHTML = '';
-    Object.keys(sessions)
-        .sort((a, b) => sessions[b].updatedAt - sessions[a].updatedAt)
-        .forEach(id => {
+async function loadSessionsList() {
+    try {
+        const res = await fetch('/api/conversations');
+        if (!res.ok) return;
+        const sessions = await res.json();
+        
+        chatList.innerHTML = '';
+        sessions.forEach(session => {
             const div = document.createElement('div');
-            div.className = `chat-item ${id === currentSessionId ? 'active' : ''}`;
+            div.className = `chat-item ${session.id === currentSessionId ? 'active' : ''}`;
             const titleSpan = document.createElement('span');
             titleSpan.className = 'chat-item-title';
-            titleSpan.textContent = sessions[id].title;
-            titleSpan.onclick = () => loadSession(id);
+            titleSpan.textContent = session.title;
+            titleSpan.onclick = () => loadSession(session.id);
             const actionsDiv = document.createElement('div');
             actionsDiv.className = 'chat-item-actions';
             const renameBtn = document.createElement('i');
             renameBtn.className = 'fa-solid fa-pen chat-action-btn';
             renameBtn.title = 'Rename Chat';
-            renameBtn.onclick = (e) => { e.stopPropagation(); renameSession(id); };
+            renameBtn.onclick = (e) => { e.stopPropagation(); renameSession(session.id, session.title); };
             const deleteBtn = document.createElement('i');
             deleteBtn.className = 'fa-solid fa-trash chat-action-btn';
             deleteBtn.title = 'Delete Chat';
-            deleteBtn.onclick = (e) => { e.stopPropagation(); deleteSession(id); };
+            deleteBtn.onclick = (e) => { e.stopPropagation(); deleteSession(session.id); };
             actionsDiv.appendChild(renameBtn);
             actionsDiv.appendChild(deleteBtn);
             div.appendChild(titleSpan);
             div.appendChild(actionsDiv);
             chatList.appendChild(div);
         });
+    } catch (err) {
+        console.error('Failed to load sessions', err);
+    }
 }
 
-function deleteSession(id) {
+async function deleteSession(id) {
     if (confirm("Are you sure you want to delete this conversation?")) {
-        const sessions = getSessions();
-        delete sessions[id];
-        localStorage.setItem('oxy_sessions', JSON.stringify(sessions));
-        if (id === currentSessionId) createNewSession();
-        else loadSessionsList();
+        try {
+            await fetch(`/api/conversations/${id}`, { method: 'DELETE' });
+            if (id === currentSessionId) createNewSession();
+            else loadSessionsList();
+        } catch (err) {
+            console.error('Delete failed', err);
+        }
     }
 }
 
-function renameSession(id) {
-    const sessions = getSessions();
-    const newTitle = prompt("Enter new name for this conversation:", sessions[id].title);
+async function renameSession(id, oldTitle) {
+    const newTitle = prompt("Enter new name for this conversation:", oldTitle);
     if (newTitle && newTitle.trim() !== '') {
-        sessions[id].title = newTitle.trim();
-        localStorage.setItem('oxy_sessions', JSON.stringify(sessions));
-        loadSessionsList();
+        try {
+            await fetch(`/api/conversations/${id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ title: newTitle.trim() })
+            });
+            loadSessionsList();
+        } catch (err) {
+            console.error('Rename failed', err);
+        }
     }
 }
 
-function loadSession(id) {
-    const sessions = getSessions();
-    if (sessions[id]) {
+async function loadSession(id) {
+    try {
+        const res = await fetch(`/api/conversations/${id}/messages`);
+        if (!res.ok) return;
+        const messages = await res.json();
+        
         currentSessionId = id;
-        currentChatHistory = sessions[id].history;
+        currentChatHistory = messages.map(m => ({
+            sender: m.role === 'model' ? 'bot' : 'user',
+            text: m.text
+        }));
+        
         renderHistory();
         loadSessionsList();
         regenBtn.style.display = currentChatHistory.length > 0 && currentChatHistory[currentChatHistory.length-1]?.sender === 'bot' ? 'flex' : 'none';
         if (window.innerWidth <= 1024) closeSidebar();
+    } catch (err) {
+        console.error('Failed to load session', err);
     }
+}
+
+function saveSession() {
+    // Handled by the backend during /api/chat
+    loadSessionsList();
 }
 
 function createNewSession() {
@@ -287,16 +327,6 @@ function createNewSession() {
     pendingFiles = [];
     updateFilePreviewStrip();
     loadSessionsList();
-    
-    // Register this new session on the server for analytics
-    fetch('/api/session/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ sessionId: currentSessionId })
-    }).catch(err => {
-        // Non-critical — analytics tracking is best-effort
-        console.log('[Analytics] Session registration skipped:', err.message);
-    });
 }
 
 document.getElementById('new-chat-btn').addEventListener('click', createNewSession);
@@ -1489,8 +1519,11 @@ if ('serviceWorker' in navigator) {
 })();
 
 // === INIT ===
-function initApp() {
+async function initApp() {
     console.log('[App] Initializing OXY AI...');
+    const isAuthenticated = await checkAuth();
+    if (!isAuthenticated) return;
+    
     updateUserUI();
     loadSessionsList();
     initLocation();
