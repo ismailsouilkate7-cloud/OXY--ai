@@ -14,6 +14,7 @@ import cookieParser from 'cookie-parser';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import pool, { initDb } from './db.js';
+import bcrypt from 'bcrypt';
 
 dotenv.config();
 
@@ -202,23 +203,7 @@ app.use(cookieParser());
 // ============================================================
 const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_do_not_use_in_prod';
 
-// Helper: hash password using Node.js built-in crypto (PBKDF2) — zero native deps, works everywhere including Vercel
-function hashPassword(password) {
-    const salt = crypto.randomBytes(16).toString('hex');
-    const hash = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
-    return salt + ':' + hash;
-}
-
-// Helper: verify password against stored hash
-function verifyPassword(password, stored) {
-    const [salt, key] = stored.split(':');
-    if (!salt || !key) {
-        console.error('[Auth] Invalid stored hash format — expecting salt:hash');
-        return false;
-    }
-    const hash = crypto.pbkdf2Sync(password, salt, 10000, 64, 'sha512').toString('hex');
-    return key === hash;
-}
+// Password hashing will now use bcrypt directly in the route handlers
 
 // Middleware to protect routes
 function requireUserAuth(req, res, next) {
@@ -264,8 +249,8 @@ app.post('/api/auth/register', async (req, res) => {
     }
 
     try {
-        const passwordHash = hashPassword(password);
-        console.log(`[Auth] Password hashed successfully using crypto.pbkdf2`);
+        const passwordHash = await bcrypt.hash(password, 10);
+        console.log(`[Auth] Password hashed successfully using bcrypt`);
 
         const result = await pool.query(
             'INSERT INTO users (email, password_hash, name) VALUES ($1, $2, $3) RETURNING id, email, name',
@@ -325,7 +310,7 @@ app.post('/api/auth/login', async (req, res) => {
 
         console.log(`[Auth] Verifying password for user ${user.id}...`);
         console.log(`[Auth] Stored hash (first 30 chars): ${(user.password_hash || '').substring(0, 30)}...`);
-        const match = verifyPassword(password, user.password_hash);
+        const match = await bcrypt.compare(password, user.password_hash);
         console.log(`[Auth] Password verification result: ${match}`);
 
         if (!match) {
