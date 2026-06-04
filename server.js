@@ -12,7 +12,7 @@ import fs from 'fs';
 import DDG from 'duck-duck-scrape';
 import cookieParser from 'cookie-parser';
 import crypto from 'crypto';
-import bcrypt from 'bcrypt';
+import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import pool, { initDb } from './db.js';
 
