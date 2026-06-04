@@ -28,6 +28,58 @@ body {
     overflow: hidden;
 }
 
+/* ========== Global Custom Scrollbar ========== */
+* {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.10) transparent;
+}
+
+::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.10);
+    border-radius: 100px;
+    transition: background 0.2s;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.20);
+}
+
+::-webkit-scrollbar-thumb:active {
+    background: rgba(255, 255, 255, 0.30);
+}
+
+::-webkit-scrollbar-corner {
+    background: transparent;
+}
+
+/* Sidebar chat list — slightly narrower */
+.recent-chats::-webkit-scrollbar {
+    width: 4px;
+}
+
+.recent-chats::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.08);
+    border-radius: 100px;
+}
+
+.recent-chats::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.16);
+}
+
+/* Main chat area — auto-hide effect */
+.chat-container {
+    scrollbar-gutter: stable;
+}
+
 .app-container {
     display: flex;
     height: 100vh;

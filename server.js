@@ -225,7 +225,7 @@ function optionalUserAuth(req, res, next) {
 }
 
 app.post('/api/auth/register', async (req, res) => {
-    const { email, password } = req.body;
+    const { email, password, name } = req.body;
     if (!email || !password) {
         return res.status(400).json({ error: 'Email and password are required' });
     }
@@ -240,8 +240,8 @@ app.post('/api/auth/register', async (req, res) => {
         const passwordHash = await bcrypt.hash(password, saltRounds);
 
         const result = await pool.query(
-            'INSERT INTO users (email, password_hash) VALUES ($1, $2) RETURNING id, email',
-            [email.toLowerCase(), passwordHash]
+            'INSERT INTO users (email, password_hash, name) VALUES ($1, $2, $3) RETURNING id, email, name',
+            [email.toLowerCase(), passwordHash, name || null]
         );
 
         const user = result.rows[0];
@@ -296,7 +296,7 @@ app.post('/api/auth/login', async (req, res) => {
             maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
         });
 
-        res.json({ user: { id: user.id, email: user.email } });
+        res.json({ user: { id: user.id, email: user.email, name: user.name } });
     } catch (err) {
         console.error('Login error:', err);
         res.status(500).json({ error: 'Internal server error' });
@@ -310,7 +310,7 @@ app.post('/api/auth/logout', (req, res) => {
 
 app.get('/api/auth/me', requireUserAuth, async (req, res) => {
     try {
-        const result = await pool.query('SELECT id, email FROM users WHERE id = $1', [req.user.userId]);
+        const result = await pool.query('SELECT id, email, name FROM users WHERE id = $1', [req.user.userId]);
         if (result.rows.length === 0) {
             return res.status(404).json({ error: 'User not found' });
         }

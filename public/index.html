@@ -102,8 +102,7 @@
                 <div class="user-info">
                     <span class="user-name" id="user-name-display">User</span>
                 </div>
-                <i class="fa-solid fa-gear settings-icon" id="settings-btn" title="Settings"></i>
-                <i class="fa-solid fa-right-from-bracket settings-icon" id="logout-btn" title="Log Out" style="margin-left: 8px;"></i>
+                <i class="fa-solid fa-right-from-bracket settings-icon" id="logout-btn" title="Log Out"></i>
             </div>
         </aside>
 
@@ -258,53 +257,6 @@
         </div>
     </div>
 
-    <!-- Settings Modal -->
-    <div class="modal-overlay" id="settings-modal" style="display: none;">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Settings</h3>
-                <button class="close-modal-btn" id="close-settings-btn"><i class="fa-solid fa-xmark"></i></button>
-            </div>
-            <div class="modal-body">
-                <div class="setting-group">
-                    <label for="user-name-input">Your Name</label>
-                    <input type="text" id="user-name-input" placeholder="e.g. Ismail">
-                    <p class="setting-desc">The AI will use this name to address you.</p>
-                </div>
-                <div class="setting-group">
-                    <label>Gender</label>
-                    <div class="gender-options" id="gender-options">
-                        <label class="gender-option" data-value="Male">
-                            <input type="radio" name="gender" value="Male">
-                            <span class="gender-option-content">
-                                <i class="fa-solid fa-mars"></i>
-                                <span>Male</span>
-                            </span>
-                        </label>
-                        <label class="gender-option" data-value="Female">
-                            <input type="radio" name="gender" value="Female">
-                            <span class="gender-option-content">
-                                <i class="fa-solid fa-venus"></i>
-                                <span>Female</span>
-                            </span>
-                        </label>
-                        <label class="gender-option" data-value="Prefer not to say">
-                            <input type="radio" name="gender" value="Prefer not to say">
-                            <span class="gender-option-content">
-                                <i class="fa-solid fa-user-minus"></i>
-                                <span>Prefer not to say</span>
-                            </span>
-                        </label>
-                    </div>
-                    <p class="setting-desc">The AI will adapt its responses based on your selected gender when appropriate.</p>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="save-btn" id="save-settings-btn">Save Changes</button>
-            </div>
-        </div>
-    </div>
-
     <!-- Lightbox Modal (ChatGPT-style image viewer) -->
     <div class="lightbox-modal" id="lightbox-modal">
         <button class="lightbox-close" id="lightbox-close"><i class="fa-solid fa-xmark"></i></button>
@@ -317,6 +269,7 @@
     <div class="toast-container" id="toast-container"></div>
 
 
+    <script src="persistence.js"></script>
     <script src="app.js"></script>
 </body>
 </html>

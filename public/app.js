@@ -15,11 +15,10 @@ const stopBtn = document.getElementById('stop-btn');
 const regenBtn = document.getElementById('regen-btn');
 const chatList = document.getElementById('chat-list');
 const clearChatBtn = document.getElementById('clear-chat-btn');
-const settingsBtn = document.getElementById('settings-btn');
 const shareBtn = document.getElementById('share-btn');
 
 // === LOCATION SERVICE ===
-let userLocation = localStorage.getItem('oxy_user_location') || null;
+let userLocation = (typeof OXYPersistence !== 'undefined' ? OXYPersistence.getItem('oxy_user_location') : localStorage.getItem('oxy_user_location')) || null;
 
 async function fetchUserLocation() {
     try {
@@ -38,7 +37,11 @@ function initLocation() {
     fetchUserLocation().then(location => {
         if (location) {
             userLocation = location;
-            localStorage.setItem('oxy_user_location', location);
+            if (typeof OXYPersistence !== 'undefined') {
+                OXYPersistence.setItemSync('oxy_user_location', location);
+            } else {
+                localStorage.setItem('oxy_user_location', location);
+            }
             if (OXYWidgetRenderer && OXYWidgetRenderer.setUserLocation) {
                 OXYWidgetRenderer.setUserLocation(location);
             }
@@ -86,22 +89,14 @@ const toastContainer = document.getElementById('toast-container');
 let lightboxImages = [];
 let lightboxCurrentIndex = 0;
 
-// Modal Elements
-const settingsModal = document.getElementById('settings-modal');
-const closeSettingsBtn = document.getElementById('close-settings-btn');
-const saveSettingsBtn = document.getElementById('save-settings-btn');
-const userNameInput = document.getElementById('user-name-input');
-const userNameDisplay = document.querySelector('.user-name');
-const genderRadios = document.querySelectorAll('input[name="gender"]');
-
 // === STATE ===
 let currentSessionId = '';
 let abortController = null;
 let isGenerating = false;
 let isUploading = false;
 let currentChatHistory = [];
-let userName = localStorage.getItem('oxy_user_name') || 'user-(set your name in settings)';
-let userGender = localStorage.getItem('oxy_user_gender') || 'Prefer not to say';
+let userName = 'User';
+let userGender = 'Prefer not to say';
 let pendingFiles = []; // { id, file, preview, name, size, type }
 let cameraStream = null;
 let cameraFacingMode = 'user';
@@ -111,6 +106,10 @@ let fileIdCounter = 0;
 
 // === RECENT FILES (stored in localStorage) ===
 function getRecentFiles() {
+    if (typeof OXYPersistence !== 'undefined') {
+        const val = OXYPersistence.getItem('oxy_recent_files');
+        return Array.isArray(val) ? val : [];
+    }
     try { return JSON.parse(localStorage.getItem('oxy_recent_files') || '[]'); } catch { return []; }
 }
 
@@ -127,7 +126,11 @@ function addRecentFile(fileInfo) {
     });
     // Keep last 20
     if (recent.length > 20) recent.pop();
-    localStorage.setItem('oxy_recent_files', JSON.stringify(recent));
+    if (typeof OXYPersistence !== 'undefined') {
+        OXYPersistence.setItemSync('oxy_recent_files', recent);
+    } else {
+        localStorage.setItem('oxy_recent_files', JSON.stringify(recent));
+    }
 }
 
 // === TOAST NOTIFICATION ===
@@ -143,41 +146,9 @@ function showToast(message, type = 'info', duration = 3000) {
     }, duration);
 }
 
-// === SETTINGS ===
-settingsBtn.addEventListener('click', () => {
-    userNameInput.value = userName;
-    // Set gender radio to match saved value
-    genderRadios.forEach(radio => {
-        if (radio.value === userGender) {
-            radio.checked = true;
-        }
-    });
-    settingsModal.style.display = 'flex';
-});
-
-closeSettingsBtn.addEventListener('click', () => {
-    settingsModal.style.display = 'none';
-});
-
-saveSettingsBtn.addEventListener('click', () => {
-    const newName = userNameInput.value.trim();
-    if (newName) {
-        userName = newName;
-        localStorage.setItem('oxy_user_name', userName);
-        updateUserUI();
-    }
-    // Save gender
-    genderRadios.forEach(radio => {
-        if (radio.checked) {
-            userGender = radio.value;
-            localStorage.setItem('oxy_user_gender', userGender);
-        }
-    });
-    settingsModal.style.display = 'none';
-});
-
 function updateUserUI() {
-    userNameDisplay.textContent = userName;
+    const display = document.querySelector('.user-name');
+    if (display) display.textContent = userName;
 }
 
 shareBtn.addEventListener('click', () => {
@@ -210,7 +181,7 @@ async function checkAuth() {
         }
         const data = await res.json();
         currentUser = data.user;
-        userName = currentUser.name;
+        userName = currentUser.name || currentUser.email.split('@')[0] || 'User';
         userGender = currentUser.gender || 'Prefer not to say';
         document.getElementById('user-name-display').textContent = userName;
         return true;
@@ -333,9 +304,6 @@ document.getElementById('new-chat-btn').addEventListener('click', createNewSessi
 
 clearChatBtn.addEventListener('click', () => {
     if (confirm("Are you sure you want to clear this chat?")) {
-        const sessions = getSessions();
-        delete sessions[currentSessionId];
-        localStorage.setItem('oxy_sessions', JSON.stringify(sessions));
         createNewSession();
     }
 });
@@ -350,6 +318,9 @@ function openSidebar() {
     } else {
         sidebar.classList.remove('closed');
     }
+    if (typeof OXYPersistence !== 'undefined') {
+        OXYPersistence.setItem('oxy_sidebar_closed', false);
+    }
 }
 function closeSidebar() {
     if (window.innerWidth <= 1024) {
@@ -357,6 +328,9 @@ function closeSidebar() {
         sidebarOverlay.classList.remove('active');
     } else {
         sidebar.classList.add('closed');
+    }
+    if (typeof OXYPersistence !== 'undefined') {
+        OXYPersistence.setItem('oxy_sidebar_closed', true);
     }
 }
 function isSidebarOpen() {
@@ -433,7 +407,6 @@ document.addEventListener('keydown', (e) => {
         if (attachMenuOpen) { closeAttachMenu(); return; }
         if (cameraModal.style.display !== 'none') { closeCamera(); return; }
         if (recentFilesModal.style.display !== 'none') { closeRecentFilesModal(); return; }
-        if (settingsModal.style.display !== 'none') { settingsModal.style.display = 'none'; return; }
         if (lightboxModal.classList.contains('open')) { closeLightbox(); return; }
         if (isSidebarOpen()) closeSidebar();
     }
@@ -967,7 +940,8 @@ function appendMessage(text, sender, finalRender = true, files = null) {
     const avatar = document.createElement('div');
     avatar.className = 'message-avatar';
     if (sender === 'user') {
-        const initials = userName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
+        const displayName = userName || 'User';
+        const initials = displayName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
         avatar.textContent = initials;
     } else {
         avatar.innerHTML = '<div class="logo-ring msg-ring"><div class="logo-ring-glow"></div></div>';
