@@ -187,6 +187,13 @@ app.use((req, res, next) => {
 });
 
 // ============================================================
+// TRUST PROXY — Express behind Vercel edge / reverse proxy
+// ============================================================
+// Without this, req.secure is false on Vercel (HTTPS terminated at edge),
+// and cookies with secure:true would be rejected by the browser.
+app.set('trust proxy', 1);
+
+// ============================================================
 // COOKIE PARSER — for admin session cookies
 // ============================================================
 app.use(cookieParser());
@@ -226,12 +233,16 @@ function optionalUserAuth(req, res, next) {
 
 app.post('/api/auth/register', async (req, res) => {
     const { email, password, name } = req.body;
+    console.log(`[Auth] Register attempt for email: ${email}`);
+
     if (!email || !password) {
+        console.log('[Auth] Register blocked: missing email or password');
         return res.status(400).json({ error: 'Email and password are required' });
     }
     
     // Warn if DB is not connected
     if (!process.env.DATABASE_URL || process.env.DATABASE_URL.includes('username:password')) {
+        console.error('[Auth] Register blocked: DATABASE_URL not configured');
         return res.status(503).json({ error: 'Database is not configured. Please set a valid DATABASE_URL.' });
     }
 
@@ -247,10 +258,16 @@ app.post('/api/auth/register', async (req, res) => {
         const user = result.rows[0];
         const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '30d' });
 
+        // On Vercel (HTTPS terminated at edge), NODE_ENV may not be 'production' unless set in env vars.
+        // Use the isVercel flag + req.secure (works with trust proxy) to determine HTTPS correctly.
+        const isSecure = isVercel || req.secure || process.env.NODE_ENV === 'production';
+        console.log(`[Auth] Register success. Setting cookie: secure=${isSecure}, sameSite=lax, path=/, Vercel=${isVercel}, req.secure=${req.secure}`);
+
         res.cookie('auth_token', token, {
             httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
+            secure: isSecure,
             sameSite: 'lax',
+            path: '/',
             maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
         });
 
@@ -266,54 +283,74 @@ app.post('/api/auth/register', async (req, res) => {
 
 app.post('/api/auth/login', async (req, res) => {
     const { email, password } = req.body;
+    console.log(`[Auth] Login attempt for email: ${email}`);
+
     if (!email || !password) {
+        console.log('[Auth] Login blocked: missing email or password');
         return res.status(400).json({ error: 'Email and password are required' });
     }
 
     if (!process.env.DATABASE_URL || process.env.DATABASE_URL.includes('username:password')) {
+        console.error('[Auth] Login blocked: DATABASE_URL not configured');
         return res.status(503).json({ error: 'Database is not configured. Please set a valid DATABASE_URL.' });
     }
 
     try {
+        console.log(`[Auth] Querying DB for email: ${email.toLowerCase()}`);
         const result = await pool.query('SELECT * FROM users WHERE email = $1', [email.toLowerCase()]);
         const user = result.rows[0];
+        console.log(`[Auth] User found: ${!!user}, user_id: ${user?.id}`);
 
         if (!user) {
+            console.log(`[Auth] Login failed: user not found for email: ${email.toLowerCase()}`);
             return res.status(401).json({ error: 'Invalid credentials' });
         }
 
+        console.log(`[Auth] Comparing password for user ${user.id}...`);
         const match = await bcrypt.compare(password, user.password_hash);
+        console.log(`[Auth] Password match result: ${match}`);
+
         if (!match) {
+            console.log(`[Auth] Login failed: password mismatch for user: ${user.id}`);
             return res.status(401).json({ error: 'Invalid credentials' });
         }
 
         const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '30d' });
 
+        // On Vercel (HTTPS terminated at edge), NODE_ENV may not be 'production' unless set in env vars.
+        // Use the isVercel flag + req.secure (works with trust proxy) to determine HTTPS correctly.
+        const isSecure = isVercel || req.secure || process.env.NODE_ENV === 'production';
+        console.log(`[Auth] Login success. Setting cookie: secure=${isSecure}, sameSite=lax, path=/, Vercel=${isVercel}, req.secure=${req.secure}`);
+
         res.cookie('auth_token', token, {
             httpOnly: true,
-            secure: process.env.NODE_ENV === 'production',
+            secure: isSecure,
             sameSite: 'lax',
+            path: '/',
             maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
         });
 
         res.json({ user: { id: user.id, email: user.email, name: user.name } });
     } catch (err) {
-        console.error('Login error:', err);
+        console.error('[Auth] Login error:', err.message, err.stack?.substring(0, 200));
         res.status(500).json({ error: 'Internal server error' });
     }
 });
 
 app.post('/api/auth/logout', (req, res) => {
-    res.clearCookie('auth_token');
+    res.clearCookie('auth_token', { path: '/' });
     res.json({ success: true });
 });
 
 app.get('/api/auth/me', requireUserAuth, async (req, res) => {
     try {
+        console.log(`[Auth] /me lookup for userId: ${req.user.userId}`);
         const result = await pool.query('SELECT id, email, name FROM users WHERE id = $1', [req.user.userId]);
         if (result.rows.length === 0) {
+            console.log(`[Auth] /me failed: user not found for id: ${req.user.userId}`);
             return res.status(404).json({ error: 'User not found' });
         }
+        console.log(`[Auth] /me success for: ${result.rows[0].email}`);
         res.json({ user: result.rows[0] });
     } catch (err) {
         console.error('Get me error:', err);
