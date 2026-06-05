@@ -233,6 +233,28 @@ function optionalUserAuth(req, res, next) {
     next();
 }
 
+// ============================================================
+// PAGE ROUTES
+// ============================================================
+
+app.get('/login', optionalUserAuth, (req, res) => {
+    if (req.user) {
+        return res.redirect('/chat');
+    }
+    res.sendFile(path.join(__dirname, 'public', 'login.html'));
+});
+
+app.get('/register', optionalUserAuth, (req, res) => {
+    if (req.user) {
+        return res.redirect('/chat');
+    }
+    res.sendFile(path.join(__dirname, 'public', 'register.html'));
+});
+
+app.get('/chat', optionalUserAuth, (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'chat.html'));
+});
+
 app.post('/api/auth/register', async (req, res) => {
     const { email, password, name } = req.body;
     console.log(`[Auth] Register attempt for email: ${email}`);
