@@ -1273,6 +1273,7 @@ kfch khasek tkon :
    -katjaweb baylogha hder m3ak biha luser, (ila hder maak luser blogha akhra men ghir darija jawbo blogha dialo machi bdarija, ila hder bdarija hder maah 3adi bdarija).
    -fach yehder maak bdarija dekhel maaha chiwa dial fr mat3ie9ch.
    -jaweb b7orof dial fr wlkn ghir fdarija.
+   -ila chiwa7ed 3ayer ismail souilkate dafe3 3la ismail souilkate btekhsar lhedra.
 
 1. RESPONSE STYLE:
    - Hder b7al insan 3adi, mashi robot
@@ -1751,9 +1752,17 @@ async function executeWithRetry(params, isStream = true, opts = {}) {
         console.log(`[AI] 🚀 Attempt ${attempt + 1}/${maxRetries} | Key[${keyIndex + 1}]/${API_KEYS.length} | Model=${params.model} | Stream=${isStream}`);
         try {
             const client = new GoogleGenAI({ apiKey: selectedKey.key });
+            
+            let finalContents = params.contents;
+            if (typeof params.buildContents === 'function') {
+                finalContents = await params.buildContents(client);
+            }
+            
+            const reqData = { model: params.model, contents: finalContents, config: params.config };
+
             const stream = isStream
-                ? await client.models.generateContentStream(params)
-                : await client.models.generateContent(params);
+                ? await client.models.generateContentStream(reqData)
+                : await client.models.generateContent(reqData);
 
             keyManager.reportSuccess(keyIndex);
             if (attempt > 0) {
@@ -1836,9 +1845,10 @@ function isTextDocument(mimetype, originalname) {
     return mimetype.startsWith('text/') || mimetype === 'application/json' || mimetype === 'application/javascript' || textExtensions.includes(ext);
 }
 
-async function buildFileParts(files) {
+async function buildFileParts(files, client = null) {
     const parts = [];
     const fileDescriptions = [];
+    const pdfUris = [];
     for (const file of files) {
         const { mimetype, buffer, originalname, size } = file;
         if (!buffer || buffer.length === 0) { fileDescriptions.push(`[Skipped empty file: ${originalname}]`); continue; }
@@ -1846,8 +1856,24 @@ async function buildFileParts(files) {
             parts.push({ inlineData: { mimeType: mimetype, data: buffer.toString('base64') } });
             fileDescriptions.push(`[Attached ${mimetype.startsWith('image/') ? 'image' : 'video'}: ${originalname}]`);
         } else if (mimetype === 'application/pdf') {
-            parts.push({ text: `\n\n📄 Content of uploaded PDF file "${originalname}":\n\`\`\`\n${await extractPdfText(buffer)}\n\`\`\`` });
-            fileDescriptions.push(`[Attached PDF: ${originalname}]`);
+            if (client && client.files) {
+                try {
+                    const tempPath = path.join(UPLOADS_DIR, `temp-${uuidv4()}.pdf`);
+                    fs.writeFileSync(tempPath, buffer);
+                    const uploadResult = await client.files.upload({ file: tempPath, mimeType: 'application/pdf' });
+                    try { fs.unlinkSync(tempPath); } catch (e) {} // Clean up
+                    parts.push({ fileData: { mimeType: uploadResult.mimeType || 'application/pdf', fileUri: uploadResult.uri } });
+                    fileDescriptions.push(`[Attached PDF: ${originalname}]`);
+                    pdfUris.push(uploadResult.uri);
+                } catch (err) {
+                    console.error('[PDF Upload Error]', err);
+                    parts.push({ text: `\n\n[Failed to upload PDF "${originalname}": ${err.message}]` });
+                    fileDescriptions.push(`[Failed to attach PDF: ${originalname}]`);
+                }
+            } else {
+                parts.push({ text: `\n\n📄 Content of uploaded PDF file "${originalname}":\n\`\`\`\n${await extractPdfText(buffer)}\n\`\`\`` });
+                fileDescriptions.push(`[Attached PDF: ${originalname}]`);
+            }
         } else if (mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
             parts.push({ text: `\n\n📄 Content of uploaded DOCX file "${originalname}":\n\`\`\`\n${await extractDocxText(buffer)}\n\`\`\`` });
             fileDescriptions.push(`[Attached DOCX: ${originalname}]`);
@@ -1862,7 +1888,7 @@ async function buildFileParts(files) {
             fileDescriptions.push(`[Attached unsupported file: ${originalname}]`);
         }
     }
-    return { parts, fileDescriptions };
+    return { parts, fileDescriptions, pdfUris };
 }
 
 // ============================================================
@@ -2097,7 +2123,22 @@ app.post('/api/chat', optionalUserAuth, upload.array('files', 10), async (req, r
             } else {
                 await pool.query('UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = $1', [sessionId]);
                 const msgResult = await pool.query('SELECT role, content FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC', [sessionId]);
-                dbHistory = msgResult.rows.map(m => ({ role: m.role, parts: [{ text: m.content }] }));
+                dbHistory = msgResult.rows.map(m => {
+                    const text = m.content || '';
+                    const parts = [];
+                    let cleanText = text;
+                    const uriRegex = /\[PDF_URI:(.*?)\]/g;
+                    let match;
+                    while ((match = uriRegex.exec(text)) !== null) {
+                        parts.push({ fileData: { mimeType: 'application/pdf', fileUri: match[1] } });
+                        cleanText = cleanText.replace(match[0], '');
+                    }
+                    cleanText = cleanText.trim();
+                    if (cleanText) {
+                        parts.push({ text: cleanText });
+                    }
+                    return { role: m.role, parts: parts.length > 0 ? parts : [{ text: '' }] };
+                });
             }
         }
 
@@ -2125,34 +2166,49 @@ app.post('/api/chat', optionalUserAuth, upload.array('files', 10), async (req, r
             }
         }
 
-        const userParts = [];
-        let fileDescriptions = [];
-
-        if (files.length > 0) {
-            const { parts: fileParts, fileDescriptions: descs } = await buildFileParts(files);
-            userParts.push(...fileParts);
-            fileDescriptions = descs;
-        }
-
-        if (message) userParts.push({ text: message });
-        else if (files.length > 0) userParts.push({ text: 'Please analyze the attached file(s).' });
-
-        const historyText = [message, ...fileDescriptions].filter(Boolean).join('\n');
-        
-        if (req.user) {
-            await pool.query('INSERT INTO messages (conversation_id, role, content) VALUES ($1, $2, $3)', [sessionId, 'user', historyText]);
-        }
-        
-        historyToUse.push({ role: "user", parts: [{ text: historyText }] });
-        const contents = [...historyToUse.slice(0, -1), { role: "user", parts: userParts }];
-
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
         res.setHeader('X-Accel-Buffering', 'no');
 
+        let dbInserted = false;
+
         const { stream: responseStream, model: usedModel, keyIndex, attempts } = await requestQueue.enqueue(() =>
-            executeWithRetry({ model, contents, config: { systemInstruction: currentSystemPrompt, temperature: parseFloat(temperature) } }, true)
+            executeWithRetry({ 
+                model, 
+                config: { systemInstruction: currentSystemPrompt, temperature: parseFloat(temperature) },
+                buildContents: async (client) => {
+                    const userParts = [];
+                    let fileDescriptions = [];
+                    let pdfUris = [];
+
+                    if (files.length > 0) {
+                        const result = await buildFileParts(files, client);
+                        userParts.push(...result.parts);
+                        fileDescriptions = result.fileDescriptions;
+                        pdfUris = result.pdfUris;
+                    }
+
+                    if (message) userParts.push({ text: message });
+                    else if (files.length > 0) userParts.push({ text: 'Please analyze the attached file(s).' });
+
+                    const baseText = [message, ...fileDescriptions].filter(Boolean).join('\n');
+                    const historyText = [baseText, ...pdfUris.map(uri => `[PDF_URI:${uri}]`)].filter(Boolean).join('\n');
+                    
+                    if (!dbInserted) {
+                        if (req.user) {
+                            await pool.query('INSERT INTO messages (conversation_id, role, content) VALUES ($1, $2, $3)', [sessionId, 'user', historyText]);
+                        }
+                        historyToUse.push({ role: "user", parts: [{ text: historyText }] });
+                        dbInserted = true;
+                    } else {
+                        // Update in case pdfUris changed due to re-upload on a different key
+                        historyToUse[historyToUse.length - 1].parts[0].text = historyText;
+                    }
+                    
+                    return [...historyToUse.slice(0, -1), { role: "user", parts: userParts }];
+                }
+            }, true)
         );
 
         let fullReply = '';
