@@ -429,17 +429,45 @@ body {
 
 /* Responsive */
 @media (max-width: 768px) {
-    .hero-title { font-size: 48px; }
+    .header-container { padding: 16px; }
+    .hero { padding: 120px 20px 60px; }
+    .hero-title { font-size: 42px; }
     .hero-subtitle { font-size: 18px; }
     .nav-links { display: none; }
-    .demo-body { padding: 20px; }
+    .features { padding: 60px 20px; }
+    .section-header h2 { font-size: 32px; }
+    .demo { padding: 40px 20px 60px; }
+    .demo-body { padding: 20px; gap: 20px; }
     .demo-message { max-width: 95%; }
-    .footer-container { flex-direction: column; }
-    .footer-links { gap: 32px; }
+    .ai-message { gap: 12px; }
+    .footer-container { flex-direction: column; gap: 32px; }
+    .footer-links { gap: 32px; flex-direction: column; }
+    .footer { padding: 40px 20px 20px; }
 }
 @media (max-width: 480px) {
-    .hero-title { font-size: 36px; }
-    .hero-actions { flex-direction: column; }
-    .btn-primary, .btn-secondary { width: 100%; text-align: center; }
+    .logo-text { font-size: 20px; }
+    .logo-ring { width: 28px; height: 28px; }
+    .btn-signup, .btn-primary { padding: 8px 16px; font-size: 14px; }
+    .auth-buttons { gap: 12px; }
     .auth-buttons .btn-login { display: none; }
+    
+    .hero { padding: 100px 16px 50px; }
+    .hero-title { font-size: 32px; }
+    .hero-subtitle { font-size: 16px; margin-bottom: 30px; }
+    .hero-actions { flex-direction: column; width: 100%; max-width: 300px; margin: 0 auto; gap: 12px; }
+    .btn-primary, .btn-secondary { width: 100%; text-align: center; }
+    
+    .feature-card { padding: 24px; }
+    .section-header h2 { font-size: 28px; }
+    .section-header p { font-size: 16px; }
+    
+    .demo-header { padding: 10px 16px; }
+    .demo-title { margin-right: 0; font-size: 12px; text-align: right; }
+    .demo-dots { gap: 6px; }
+    .demo-dots span { width: 10px; height: 10px; }
+    
+    .ai-message { flex-direction: column; }
+    .ai-avatar { display: none; }
+    .user-message { font-size: 14px; }
+    .ai-content { font-size: 14px; padding: 16px; }
 }

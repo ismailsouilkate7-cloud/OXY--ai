@@ -94,6 +94,7 @@ let currentSessionId = '';
 let abortController = null;
 let isGenerating = false;
 let isUploading = false;
+let isProcessingFiles = false; // Track file preprocessing state
 let currentChatHistory = [];
 let userName = 'User';
 let userGender = 'Prefer not to say';
@@ -452,10 +453,15 @@ function addFilesToPending(fileList) {
             errors.push(`Maximum ${maxTotal} files allowed`);
             break;
         }
-        if (file.size > maxSize) {
+        
+        if (file.type.startsWith('video/') && file.size > 3 * 1024 * 1024) {
+            errors.push(`Video "${file.name}" is too large (max 3MB)`);
+            continue;
+        } else if (file.size > maxSize) {
             errors.push(`"${file.name}" is too large (max 50MB)`);
             continue;
         }
+        
         if (file.size === 0) {
             errors.push(`"${file.name}" is empty`);
             continue;
@@ -571,7 +577,7 @@ function setUploadingState(uploading) {
 function updateSendButton() {
     const hasText = messageInput.value.trim().length > 0;
     const hasFiles = pendingFiles.length > 0;
-    sendBtn.disabled = !(hasText || hasFiles) || isUploading;
+    sendBtn.disabled = !(hasText || hasFiles) || isUploading || isProcessingFiles;
 }
 
 // === DRAG & DROP ===
@@ -885,7 +891,24 @@ function buildFileAttachments(files) {
             attachEl.src = f.url || f.preview;
             attachEl.controls = true;
             attachEl.preload = 'metadata';
-
+            // Error handling: if the video cannot be loaded, show a fallback message
+            attachEl.addEventListener('error', function onVideoError() {
+                console.warn('[Video] Failed to load:', this.src);
+                this.removeEventListener('error', onVideoError);
+                // Replace the video element with a fallback UI
+                const fallback = document.createElement('div');
+                fallback.className = 'msg-attach-video-fallback';
+                fallback.innerHTML = `
+                    <div style="display:flex;align-items:center;gap:10px;padding:16px;background:#1a1a24;border-radius:10px;border:1px solid #2a2a3a;">
+                        <i class="fa-solid fa-circle-exclamation" style="color:#f97316;font-size:20px;"></i>
+                        <div>
+                            <div style="color:#e8e8ed;font-weight:500;">${f.name}</div>
+                            <div style="color:#8a8a9a;font-size:13px;">${formatFileSize(f.size)} — Video preview not available</div>
+                        </div>
+                    </div>
+                `;
+                this.parentNode.replaceChild(fallback, this);
+            });
         } else {
             attachEl = document.createElement('div');
             attachEl.className = 'msg-attach-file-card';
@@ -1039,8 +1062,14 @@ function handleSend() {
     });
 
     renderHistory();
-    sendMessage(text, pendingFiles, false);
-    clearPendingFiles();
+    // If files exist, preprocess them first (upload to Gemini, poll to ACTIVE)
+    // then auto-send once all files are ready
+    if (pendingFiles.length > 0) {
+        preprocessAndSend(text, pendingFiles);
+    } else {
+        sendMessage(text, [], false);
+        clearPendingFiles();
+    }
 }
 
 // === RENDER HISTORY ===
@@ -1054,7 +1083,135 @@ function renderHistory() {
 }
 
 // === SEND TO API ===
-async function sendMessage(text, files, isRegenerate = false) {
+
+// === PREPROCESS FILES + AUTO-SEND (ChatGPT/Gemini-style upload) ===
+async function preprocessAndSend(text, files) {
+    isProcessingFiles = true;
+    setUploadingState(true);
+    updateSendButton();
+
+// removed duplicate push to currentChatHistory
+
+    const botMsgDiv = appendMessage('', 'bot', false);
+    const contentDiv = botMsgDiv.querySelector('.message-content');
+
+    // Build per-file progress indicators
+    const fileItems = files.map(f => `
+        <div class="file-progress-item" style="padding:10px 0; border-bottom:1px solid #2a2a3a;">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+                <div class="upload-spinner"></div>
+                <div style="flex:1;min-width:0;color:#e8e8ed;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${f.name}</div>
+                <div class="file-progress-pct" style="color:#a855f7;font-size:12px;font-weight:600;">0%</div>
+            </div>
+            <div class="upload-progress-bar">
+                <div class="upload-progress-fill" style="width: 0%"></div>
+            </div>
+            <div class="file-progress-status" style="color:#8a8a9a;font-size:11px;margin-top:4px;">Processing...</div>
+        </div>
+    `).join('');
+
+    contentDiv.innerHTML = '<div style="padding:12px;"><div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;"><div class="typing-indicator" style="display:inline-flex;"><span></span><span></span><span></span></div><span style="color:#8a8a9a;font-size:14px;">Processing files...</span></div><div class="file-progress-list">' + fileItems + '</div></div>';
+
+    if (!document.getElementById('oxy-upload-style')) {
+        const style = document.createElement('style');
+        style.id = 'oxy-upload-style';
+        style.textContent = '@keyframes spin { to { transform: rotate(360deg); } }';
+        document.head.appendChild(style);
+    }
+
+    function updateFileProgress(name, status, progress, isError, errorMsg) {
+        const items = contentDiv.querySelectorAll('.file-progress-item');
+        let item = null;
+        for (const el of items) {
+            if (el.textContent.includes(name)) { item = el; break; }
+        }
+        if (!item) return;
+        const spinner = item.querySelector('.upload-spinner');
+        const progressBar = item.querySelector('.upload-progress-fill');
+        const statusEl = item.querySelector('.file-progress-status');
+        const pctEl = item.querySelector('.file-progress-pct');
+
+        if (isError) {
+            if (spinner) spinner.style.display = 'none';
+            if (progressBar) progressBar.style.background = '#ef4444';
+            if (statusEl) statusEl.textContent = errorMsg ? 'Error: ' + errorMsg : 'Failed';
+            if (pctEl) pctEl.textContent = 'Error';
+        } else {
+            if (progressBar) progressBar.style.width = (progress || 0) + '%';
+            if (pctEl) pctEl.textContent = (progress || 0) + '%';
+            if (status === 'ready' || progress >= 100) {
+                if (spinner) spinner.style.display = 'none';
+                if (statusEl) statusEl.textContent = 'Ready';
+                if (pctEl) pctEl.textContent = '100%';
+            } else {
+                if (statusEl) statusEl.textContent = (status === 'uploading' ? 'Uploading...' : 'Processing...') + ' ' + (progress || 0) + '%';
+            }
+        }
+    }
+
+    try {
+        const formData = new FormData();
+        for (const f of files) { formData.append('files', f.file, f.name); }
+
+        const response = await fetch('/api/preprocess-files', { method: 'POST', body: formData });
+
+        if (!response.ok) throw new Error('Preprocessing failed (HTTP ' + response.status + ')');
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder('utf-8');
+        let buf = '';
+        const processedData = [];
+
+        while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+            const lines = buf.split('\n');
+            buf = lines.pop();
+
+            for (const line of lines) {
+                if (!line.trim() || !line.startsWith('data: ')) continue;
+                try {
+                    const data = JSON.parse(line.substring(6));
+                    if (data.done) break;
+                    if (data.name) {
+                        if (data.status === 'saved') updateFileProgress(data.name, 'saved', 0);
+                        else if (data.status === 'uploading') updateFileProgress(data.name, 'uploading', data.progress || 0);
+                        else if (data.status === 'processing') updateFileProgress(data.name, 'processing', data.progress || 0);
+                        else if (data.status === 'ready') { updateFileProgress(data.name, 'ready', 100); processedData.push(data); }
+                        else if (data.status === 'failed') { updateFileProgress(data.name, 'failed', 0, true, data.error || 'Processing failed'); }
+                    }
+                } catch (e) {}
+            }
+        }
+
+        const readyFiles = processedData.filter(d => d.status === 'ready');
+        if (readyFiles.length === 0) throw new Error('All files failed to process');
+
+        if (contentDiv) {
+            contentDiv.innerHTML = '<div style="padding:10px;color:#8a8a9a;font-size:13px;"><span style="color:#22c55e;">V</span> ' + readyFiles.length + ' file(s) ready' + (processedData.length > readyFiles.length ? ' (' + (processedData.length - readyFiles.length) + ' failed)' : '') + '</div>';
+        }
+
+        setUploadingState(false);
+        isProcessingFiles = false;
+
+        // Remove the progress bubble so sendMessage creates a clean bot bubble
+        if (botMsgDiv && botMsgDiv.parentNode) botMsgDiv.parentNode.removeChild(botMsgDiv);
+
+        clearPendingFiles();
+        await sendMessage(text, [], false, processedData);
+
+    } catch (error) {
+        console.error('[Preprocess] Error:', error);
+        if (contentDiv) { contentDiv.innerHTML = '<span style="color:#ef4444;padding:12px;">X File processing error: ' + error.message + '</span>'; }
+        setUploadingState(false);
+        isProcessingFiles = false;
+        updateSendButton();
+    }
+}
+
+
+async function sendMessage(text, files, isRegenerate = false, processedFiles = null) {
     isGenerating = true;
     regenBtn.style.display = 'none';
     stopBtn.style.display = 'flex';
@@ -1073,7 +1230,7 @@ async function sendMessage(text, files, isRegenerate = false) {
     let fullResponse = '';
 
     // Show uploading state if files are present
-    const hasFiles = files && files.length > 0;
+    const hasFiles = (files && files.length > 0) || (processedFiles && processedFiles.length > 0);
     if (hasFiles) setUploadingState(true);
 
     try {
@@ -1088,8 +1245,12 @@ async function sendMessage(text, files, isRegenerate = false) {
             formData.append('userLocation', userLocation || '');
             formData.append('model', 'gemini-2.5-flash');
             formData.append('temperature', '0.7');
-            for (const f of files) {
-                formData.append('files', f.file, f.name);
+            if (processedFiles && processedFiles.length > 0) {
+                formData.append('processedFiles', JSON.stringify(processedFiles));
+            } else {
+                for (const f of files) {
+                    formData.append('files', f.file, f.name);
+                }
             }
 
             response = await fetch('/api/chat', {
@@ -1147,6 +1308,50 @@ async function sendMessage(text, files, isRegenerate = false) {
                             if (dataStr === '[DONE]') { done = true; break; }
                             try {
                                 const data = JSON.parse(dataStr);
+                                // Handle file preview URLs from the server (permanent URLs for video/audio previews)
+                                if (data.filePreviewUrls) {
+                                    console.log('[Chat] Received file preview URLs:', data.filePreviewUrls);
+                                    // Update the rendered video elements to use permanent server URLs
+                                    // instead of revoked blob URLs
+                                    const videoElements = botMsgDiv.querySelectorAll('.msg-attach-video');
+                                    data.filePreviewUrls.forEach(preview => {
+                                        videoElements.forEach(vid => {
+                                            if (vid.src && vid.src.startsWith('blob:')) {
+                                                vid.src = preview.url;
+                                                vid.load();
+                                            }
+                                        });
+                                    });
+                                                    // Also update the user message's attachment if it has video
+                                    const userMsg = messagesWrapper.querySelector('.message.user:last-child');
+                                    if (userMsg) {
+                                        const userVideos = userMsg.querySelectorAll('.msg-attach-video');
+                                        data.filePreviewUrls.forEach(preview => {
+                                            userVideos.forEach(vid => {
+                                                if (vid.src && vid.src.startsWith('blob:')) {
+                                                    vid.src = preview.url;
+                                                    vid.load();
+                                                }
+                                            });
+                                        });
+                                    }
+                                    // Update chat history so reloads use permanent URLs
+                                    const lastHistoryIdx = currentChatHistory.length - 1;
+                                    if (lastHistoryIdx >= 0 && currentChatHistory[lastHistoryIdx].files) {
+                                        const historyFiles = currentChatHistory[lastHistoryIdx].files;
+                                        data.filePreviewUrls.forEach(preview => {
+                                            const match = historyFiles.find(f => f.name === preview.name);
+                                            if (match) {
+                                                match.url = preview.url; // Store permanent URL
+                                                // Keep the blob preview only if it hasn't been revoked yet
+                                                if (match.preview && match.preview.startsWith('blob:')) {
+                                                    delete match.preview;
+                                                }
+                                            }
+                                        });
+                                    }
+                                    continue;
+                                }
                                 if (data.text) {
                                     fullResponse += data.text;
                                     // If the response looks like JSON, show a loading placeholder
@@ -1204,6 +1409,7 @@ async function sendMessage(text, files, isRegenerate = false) {
         }
     } finally {
             isGenerating = false;
+            isProcessingFiles = false;
             stopBtn.style.display = 'none';
             regenBtn.style.display = 'flex';
             if (fullResponse) {

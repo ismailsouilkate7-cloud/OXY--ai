@@ -199,9 +199,16 @@ app.post('/api/chat', optionalUserAuth, upload.array('files', 10), async (req, r
         try {
             for await (const chunk of responseStream) {
                 const chunkText = chunk.text;
-                if (chunkText) { fullReply += chunkText; if (!safeSseWrite(res, \`data: \${JSON.stringify({ text: chunkText })}\\n\\n\`)) break; }
+                if (chunkText) { fullReply += chunkText; if (!safeSseWrite(res, `data: ${JSON.stringify({ text: chunkText })}\n\n`)) break; }
             }
-        } catch (streamErr) { console.error('[Chat] Stream error:', streamErr.message?.substring(0, 150)); }
+        } catch (streamErr) {
+            console.error('[Chat] Stream error:', streamErr);
+            if (isTransientError(streamErr) || streamErr.status === 503) {
+                 safeSseWrite(res, `data: ${JSON.stringify({ error: "Service temporarily unavailable, please retry." })}\n\n`);
+            } else {
+                 safeSseWrite(res, `data: ${JSON.stringify({ error: "An error occurred during streaming." })}\n\n`);
+            }
+        }
 
         if (req.user) {
             await pool.query('INSERT INTO messages (conversation_id, role, content) VALUES ($1, $2, $3)', [sessionId, 'model', fullReply || '[No response generated]']);
