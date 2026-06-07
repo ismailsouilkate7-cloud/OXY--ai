@@ -2157,13 +2157,7 @@ textarea::placeholder {
     transform: scale(1.02);
 }
 
-.msg-attach-video {
-    max-width: 100%;
-    max-height: 300px;
-    border-radius: 12px;
-    display: block;
-    background: #000;
-}
+
 
 .msg-attach-file {
     display: flex;
@@ -2286,16 +2280,6 @@ textarea::placeholder {
 .msg-attach-img:hover {
     transform: scale(1.02);
     box-shadow: 0 4px 20px rgba(99,102,241,0.2);
-}
-
-/* Video - playable embed inside chat bubble */
-.msg-attach-video {
-    max-width: 100%;
-    max-height: 400px;
-    border-radius: 14px;
-    width: 100%;
-    background: #000;
-    box-shadow: 0 2px 12px rgba(0,0,0,0.3);
 }
 
 /* Attachments grid - groups multiple files in one bubble */
@@ -3418,8 +3402,7 @@ textarea::placeholder {
    RESPONSIVE: FILE RENDERING
    ============================================== */
 @media (max-width: 768px) {
-    .msg-attach-img,
-    .msg-attach-video {
+    .msg-attach-img {
         max-height: 250px;
         border-radius: 10px;
     }
@@ -3925,32 +3908,3 @@ html, body {
 .app-container {
     overflow-x: hidden;
 }
-. u p l o a d - s p i n n e r   { 
-         w i d t h :   2 0 p x ; 
-         h e i g h t :   2 0 p x ; 
-         b o r d e r :   2 p x   s o l i d   r g b a ( 2 5 5 ,   2 5 5 ,   2 5 5 ,   0 . 1 ) ; 
-         b o r d e r - t o p :   2 p x   s o l i d   # a 8 5 5 f 7 ; 
-         b o r d e r - r a d i u s :   5 0 % ; 
-         a n i m a t i o n :   s p i n   0 . 8 s   l i n e a r   i n f i n i t e ; 
- } 
- 
- @ k e y f r a m e s   s p i n   { 
-         t o   {   t r a n s f o r m :   r o t a t e ( 3 6 0 d e g ) ;   } 
- } 
- 
- . u p l o a d - p r o g r e s s - b a r   { 
-         h e i g h t :   4 p x ; 
-         w i d t h :   1 0 0 % ; 
-         b a c k g r o u n d :   r g b a ( 2 5 5 ,   2 5 5 ,   2 5 5 ,   0 . 1 ) ; 
-         b o r d e r - r a d i u s :   2 p x ; 
-         o v e r f l o w :   h i d d e n ; 
-         m a r g i n - t o p :   5 p x ; 
- } 
- 
- . u p l o a d - p r o g r e s s - f i l l   { 
-         h e i g h t :   1 0 0 % ; 
-         b a c k g r o u n d :   v a r ( - - a c c e n t - g r a d i e n t ) ; 
-         w i d t h :   0 % ; 
-         t r a n s i t i o n :   w i d t h   0 . 3 s   e a s e ; 
- }  
- 

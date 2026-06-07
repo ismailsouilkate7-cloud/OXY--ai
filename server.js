@@ -1081,8 +1081,6 @@ app.get('/api/location', async (req, res) => {
 const ALLOWED_MIMES = new Set([
     // Images
     'image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/gif',
-    // Videos
-    'video/mp4', 'video/quicktime', 'video/webm', 'video/x-msvideo',
     // Documents
     'application/pdf', 'text/plain', 'text/csv', 'text/markdown',
     'application/json', 'text/json',
@@ -1849,60 +1847,12 @@ async function buildFileParts(files, client = null) {
     const parts = [];
     const fileDescriptions = [];
     const pdfUris = [];
-    const videoUris = [];
-    const filePreviewUrls = [];
     for (const file of files) {
         const { mimetype, buffer, originalname, size } = file;
         if (!buffer || buffer.length === 0) { fileDescriptions.push(`[Skipped empty file: ${originalname}]`); continue; }
         if (isVisualFile(mimetype)) {
             parts.push({ inlineData: { mimeType: mimetype, data: buffer.toString('base64') } });
             fileDescriptions.push(`[Attached image: ${originalname}]`);
-        } else if (mimetype.startsWith('video/')) {
-            // Save a browser-accessible copy for frontend preview
-            const previewId = uuidv4();
-            const previewExt = path.extname(originalname || '') || '.mp4';
-            const previewName = previewId + previewExt;
-            try {
-                fs.writeFileSync(path.join(UPLOADS_DIR, previewName), buffer);
-                filePreviewUrls.push({ name: originalname, type: mimetype, size, url: `/uploads/${previewName}` });
-            } catch (e) {
-                console.warn('[Video Preview] Could not save preview copy:', e.message);
-            }
-
-            if (client && client.files) {
-                try {
-                    const ext = path.extname(originalname || '') || '.mp4';
-                    const tempPath = path.join(UPLOADS_DIR, `temp-${uuidv4()}${ext}`);
-                    fs.writeFileSync(tempPath, buffer);
-                    console.log(`[Video Upload] Uploading ${originalname} (${(size / 1024 / 1024).toFixed(1)} MB) to Gemini...`);
-                    let uploadResult = await client.files.upload({ file: tempPath, mimeType: mimetype });
-                    try { fs.unlinkSync(tempPath); } catch (e) {} // Clean up temp file immediately
-
-                    // Poll until the video is processed (state becomes ACTIVE)
-                    const maxPollAttempts = 60; // up to ~2 minutes
-                    for (let i = 0; i < maxPollAttempts; i++) {
-                        if (uploadResult.state === 'ACTIVE') break;
-                        if (uploadResult.state === 'FAILED') throw new Error('Video processing failed on Google servers');
-                        console.log(`[Video Upload] Processing ${originalname}... (state=${uploadResult.state}, attempt ${i + 1}/${maxPollAttempts})`);
-                        await new Promise(r => setTimeout(r, 2000));
-                        uploadResult = await client.files.get({ name: uploadResult.name });
-                    }
-                    if (uploadResult.state !== 'ACTIVE') {
-                        throw new Error(`Video processing timed out (state: ${uploadResult.state})`);
-                    }
-                    console.log(`[Video Upload] ✅ ${originalname} ready (uri=${uploadResult.uri})`);
-                    parts.push({ fileData: { mimeType: uploadResult.mimeType || mimetype, fileUri: uploadResult.uri } });
-                    fileDescriptions.push(`[Attached video: ${originalname}]`);
-                    videoUris.push({ mimeType: uploadResult.mimeType || mimetype, uri: uploadResult.uri });
-                } catch (err) {
-                    console.error('[Video Upload Error]', err);
-                    parts.push({ text: `\n\n[Failed to upload video "${originalname}": ${err.message}]` });
-                    fileDescriptions.push(`[Failed to attach video: ${originalname}]`);
-                }
-            } else {
-                parts.push({ text: `\n\n[Uploaded video: ${originalname} (${mimetype}, ${(size / 1024 / 1024).toFixed(1)} MB) — video analysis requires the Gemini Files API client]` });
-                fileDescriptions.push(`[Attached video: ${originalname}]`);
-            }
         } else if (mimetype === 'application/pdf') {
             if (client && client.files) {
                 try {
@@ -1936,7 +1886,7 @@ async function buildFileParts(files, client = null) {
             fileDescriptions.push(`[Attached unsupported file: ${originalname}]`);
         }
     }
-    return { parts, fileDescriptions, pdfUris, videoUris, filePreviewUrls };
+    return { parts, fileDescriptions, pdfUris };
 }
 
 // ============================================================
@@ -1959,6 +1909,38 @@ app.post('/api/upload', upload.array('files', 10), async (req, res) => {
     } catch (error) {
         console.error('[Upload] ❌ Error:', error);
         return res.status(500).json({ error: 'File upload failed' });
+    }
+});
+
+app.post('/api/preprocess-files', upload.array('files', 10), async (req, res) => {
+    const files = req.files || [];
+    if (files.length === 0) return res.status(400).json({ error: 'No files uploaded' });
+
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+
+    try {
+        for (const file of files) {
+            const fileId = uuidv4();
+            const safeName = fileId + path.extname(file.originalname);
+            fs.writeFileSync(path.join(UPLOADS_DIR, safeName), file.buffer);
+            
+            safeSseWrite(res, `data: ${JSON.stringify({ 
+                fileId, 
+                name: file.originalname, 
+                status: 'ready', 
+                progress: 100, 
+                url: `/uploads/${safeName}` 
+            })}\n\n`);
+        }
+        safeSseWrite(res, `data: ${JSON.stringify({ done: true })}\n\n`);
+        safeSseEnd(res);
+    } catch (error) {
+        console.error('[Preprocess] ❌ Error:', error.message);
+        safeSseWrite(res, `data: ${JSON.stringify({ error: 'Preprocessing failed', done: true })}\n\n`);
+        safeSseEnd(res);
     }
 });
 
@@ -2128,7 +2110,19 @@ app.post('/api/chat', optionalUserAuth, upload.array('files', 10), async (req, r
         const temperature = req.body.temperature || 0.7;
         const files = req.files || [];
 
-        if (!message && files.length === 0) {
+        // Support both raw file uploads and pre-processed file references
+        let processedFiles = [];
+        if (req.body.processedFiles) {
+            try {
+                processedFiles = typeof req.body.processedFiles === 'string'
+                    ? JSON.parse(req.body.processedFiles)
+                    : req.body.processedFiles;
+            } catch (e) {
+                console.warn('[Chat] Failed to parse processedFiles:', e.message);
+            }
+        }
+
+        if (!message && files.length === 0 && processedFiles.length === 0) {
             return res.status(400).json({ error: 'Message or files required' });
         }
 
@@ -2181,11 +2175,6 @@ app.post('/api/chat', optionalUserAuth, upload.array('files', 10), async (req, r
                         parts.push({ fileData: { mimeType: 'application/pdf', fileUri: match[1] } });
                         cleanText = cleanText.replace(match[0], '');
                     }
-                    const videoUriRegex = /\[VIDEO_URI:(.*?)\|(.*?)\]/g;
-                    while ((match = videoUriRegex.exec(text)) !== null) {
-                        parts.push({ fileData: { mimeType: match[1], fileUri: match[2] } });
-                        cleanText = cleanText.replace(match[0], '');
-                    }
                     cleanText = cleanText.trim();
                     if (cleanText) {
                         parts.push({ text: cleanText });
@@ -2234,23 +2223,45 @@ app.post('/api/chat', optionalUserAuth, upload.array('files', 10), async (req, r
                     const userParts = [];
                     let fileDescriptions = [];
                     let pdfUris = [];
-                    let videoUris = [];
 
+                    // 1. Process raw files (e.g. direct upload)
                     if (files.length > 0) {
                         const result = await buildFileParts(files, client);
                         userParts.push(...result.parts);
-                        fileDescriptions = result.fileDescriptions;
-                        pdfUris = result.pdfUris;
-                        videoUris = result.videoUris;
+                        fileDescriptions.push(...result.fileDescriptions);
+                        pdfUris.push(...result.pdfUris);
                     }
 
+                    // 2. Process pre-processed files (e.g. from /api/preprocess-files)
+                    if (processedFiles && processedFiles.length > 0) {
+                        for (const pf of processedFiles) {
+                            if (!pf.url) continue;
+                            
+                            // Load file from /uploads/
+                            const filePath = path.join(UPLOADS_DIR, path.basename(pf.url));
+                            if (fs.existsSync(filePath)) {
+                                const buffer = fs.readFileSync(filePath);
+                                if (isVisualFile(pf.type)) {
+                                    userParts.push({ inlineData: { mimeType: pf.type, data: buffer.toString('base64') } });
+                                    fileDescriptions.push(`[Attached image: ${pf.name}]`);
+                                } else {
+                                    // Handle other types if necessary, currently treat as text/unsupported
+                                    fileDescriptions.push(`[Attached file: ${pf.name} (type: ${pf.type})]`);
+                                }
+                            } else {
+                                console.log('[Chat] File not found for preprocessing:', filePath);
+                            }
+                        }
+                    }
+
+                    console.log('[Chat] Constructed userParts:', JSON.stringify(userParts.map(p => p.inlineData ? { inlineData: 'present', mimeType: p.inlineData.mimeType } : p), null, 2));
+
                     if (message) userParts.push({ text: message });
-                    else if (files.length > 0) userParts.push({ text: 'Please analyze the attached file(s).' });
+                    else if (files.length > 0 || (processedFiles && processedFiles.length > 0)) userParts.push({ text: 'Please analyze the attached file(s).' });
 
                     const baseText = [message, ...fileDescriptions].filter(Boolean).join('\n');
                     const uriTags = [
-                        ...pdfUris.map(uri => `[PDF_URI:${uri}]`),
-                        ...videoUris.map(v => `[VIDEO_URI:${v.mimeType}|${v.uri}]`)
+                        ...pdfUris.map(uri => `[PDF_URI:${uri}]`)
                     ];
                     const historyText = [baseText, ...uriTags].filter(Boolean).join('\n');
                     

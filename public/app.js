@@ -22,7 +22,6 @@ let userLocation = (typeof OXYPersistence !== 'undefined' ? OXYPersistence.getIt
 
 async function fetchUserLocation() {
     try {
-        // Use the server-side proxy to avoid CORS errors
         const response = await fetch('/api/location');
         const data = await response.json();
         const location = `${data.city || ''}, ${data.region || ''} ${data.country_name || ''}`.replace(/,\s*$/, '').trim();
@@ -49,7 +48,6 @@ function initLocation() {
     });
 }
 
-// Attachment elements
 const attachBtn = document.getElementById('attach-btn');
 const fileInput = document.getElementById('file-input');
 const attachMenu = document.getElementById('attach-menu');
@@ -62,7 +60,6 @@ const filePreviewStrip = document.getElementById('file-preview-strip');
 const dropZoneOverlay = document.getElementById('drop-zone-overlay');
 const inputWrapper = document.getElementById('input-wrapper');
 
-// Camera elements
 const cameraModal = document.getElementById('camera-modal');
 const cameraPreview = document.getElementById('camera-preview');
 const cameraCanvas = document.getElementById('camera-canvas');
@@ -70,22 +67,17 @@ const cameraCaptureBtn = document.getElementById('camera-capture-btn');
 const cameraFlipBtn = document.getElementById('camera-flip-btn');
 const cameraCloseBtn = document.getElementById('camera-close-btn');
 
-// Recent files modal
 const recentFilesModal = document.getElementById('recent-files-modal');
 const recentFilesBody = document.getElementById('recent-files-body');
 const recentFilesCloseBtn = document.getElementById('recent-files-close-btn');
 
-// Lightbox Elements
 const lightboxModal = document.getElementById('lightbox-modal');
 const lightboxImg = document.getElementById('lightbox-img');
 const lightboxClose = document.getElementById('lightbox-close');
 const lightboxDownload = document.getElementById('lightbox-download');
 const lightboxCounter = document.getElementById('lightbox-counter');
-
-// Toast
 const toastContainer = document.getElementById('toast-container');
 
-// Lightbox state
 let lightboxImages = [];
 let lightboxCurrentIndex = 0;
 
@@ -94,18 +86,15 @@ let currentSessionId = '';
 let abortController = null;
 let isGenerating = false;
 let isUploading = false;
-let isProcessingFiles = false; // Track file preprocessing state
+let isProcessingFiles = false;
 let currentChatHistory = [];
 let userName = 'User';
 let userGender = 'Prefer not to say';
-let pendingFiles = []; // { id, file, preview, name, size, type }
+let pendingFiles = [];
 let cameraStream = null;
 let cameraFacingMode = 'user';
-
-// File ID counter
 let fileIdCounter = 0;
 
-// === RECENT FILES (stored in localStorage) ===
 function getRecentFiles() {
     if (typeof OXYPersistence !== 'undefined') {
         const val = OXYPersistence.getItem('oxy_recent_files');
@@ -116,16 +105,9 @@ function getRecentFiles() {
 
 function addRecentFile(fileInfo) {
     const recent = getRecentFiles();
-    // Avoid duplicates by name
     const existing = recent.findIndex(r => r.name === fileInfo.name);
     if (existing !== -1) recent.splice(existing, 1);
-    recent.unshift({
-        name: fileInfo.name,
-        type: fileInfo.type,
-        size: fileInfo.size,
-        addedAt: Date.now()
-    });
-    // Keep last 20
+    recent.unshift({ name: fileInfo.name, type: fileInfo.type, size: fileInfo.size, addedAt: Date.now() });
     if (recent.length > 20) recent.pop();
     if (typeof OXYPersistence !== 'undefined') {
         OXYPersistence.setItemSync('oxy_recent_files', recent);
@@ -134,7 +116,6 @@ function addRecentFile(fileInfo) {
     }
 }
 
-// === TOAST NOTIFICATION ===
 function showToast(message, type = 'info', duration = 3000) {
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
@@ -162,24 +143,14 @@ shareBtn.addEventListener('click', () => {
     });
 });
 
-// === MARKED CONFIGURATION ===
-// Use marked's modern extension API for syntax highlighting
-// (setOptions highlight callback was removed in marked v5+)
-marked.use({
-    langPrefix: 'hljs language-',
-    breaks: true
-});
+marked.use({ langPrefix: 'hljs language-', breaks: true });
 
-// === AUTH & SESSION MANAGEMENT ===
 let currentUser = null;
 
 async function checkAuth() {
     try {
         const res = await fetch('/api/auth/me');
-        if (!res.ok) {
-            window.location.href = '/login.html';
-            return false;
-        }
+        if (!res.ok) { window.location.href = '/login.html'; return false; }
         const data = await res.json();
         currentUser = data.user;
         userName = currentUser.name || currentUser.email.split('@')[0] || 'User';
@@ -196,9 +167,7 @@ document.getElementById('logout-btn')?.addEventListener('click', async () => {
     try {
         await fetch('/api/auth/logout', { method: 'POST' });
         window.location.href = '/login.html';
-    } catch (err) {
-        console.error('Logout failed', err);
-    }
+    } catch (err) { console.error('Logout failed', err); }
 });
 
 async function loadSessionsList() {
@@ -206,7 +175,6 @@ async function loadSessionsList() {
         const res = await fetch('/api/conversations');
         if (!res.ok) return;
         const sessions = await res.json();
-        
         chatList.innerHTML = '';
         sessions.forEach(session => {
             const div = document.createElement('div');
@@ -231,9 +199,7 @@ async function loadSessionsList() {
             div.appendChild(actionsDiv);
             chatList.appendChild(div);
         });
-    } catch (err) {
-        console.error('Failed to load sessions', err);
-    }
+    } catch (err) { console.error('Failed to load sessions', err); }
 }
 
 async function deleteSession(id) {
@@ -242,9 +208,7 @@ async function deleteSession(id) {
             await fetch(`/api/conversations/${id}`, { method: 'DELETE' });
             if (id === currentSessionId) createNewSession();
             else loadSessionsList();
-        } catch (err) {
-            console.error('Delete failed', err);
-        }
+        } catch (err) { console.error('Delete failed', err); }
     }
 }
 
@@ -252,15 +216,9 @@ async function renameSession(id, oldTitle) {
     const newTitle = prompt("Enter new name for this conversation:", oldTitle);
     if (newTitle && newTitle.trim() !== '') {
         try {
-            await fetch(`/api/conversations/${id}`, {
-                method: 'PUT',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ title: newTitle.trim() })
-            });
+            await fetch(`/api/conversations/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: newTitle.trim() }) });
             loadSessionsList();
-        } catch (err) {
-            console.error('Rename failed', err);
-        }
+        } catch (err) { console.error('Rename failed', err); }
     }
 }
 
@@ -269,26 +227,16 @@ async function loadSession(id) {
         const res = await fetch(`/api/conversations/${id}/messages`);
         if (!res.ok) return;
         const messages = await res.json();
-        
         currentSessionId = id;
-        currentChatHistory = messages.map(m => ({
-            sender: m.role === 'model' ? 'bot' : 'user',
-            text: m.text
-        }));
-        
+        currentChatHistory = messages.map(m => ({ sender: m.role === 'model' ? 'bot' : 'user', text: m.text }));
         renderHistory();
         loadSessionsList();
         regenBtn.style.display = currentChatHistory.length > 0 && currentChatHistory[currentChatHistory.length-1]?.sender === 'bot' ? 'flex' : 'none';
         if (window.innerWidth <= 1024) closeSidebar();
-    } catch (err) {
-        console.error('Failed to load session', err);
-    }
+    } catch (err) { console.error('Failed to load session', err); }
 }
 
-function saveSession() {
-    // Handled by the backend during /api/chat
-    loadSessionsList();
-}
+function saveSession() { loadSessionsList(); }
 
 function createNewSession() {
     currentSessionId = 'sess_' + Math.random().toString(36).substr(2, 9);
@@ -302,37 +250,19 @@ function createNewSession() {
 }
 
 document.getElementById('new-chat-btn').addEventListener('click', createNewSession);
+clearChatBtn.addEventListener('click', () => { if (confirm("Are you sure you want to clear this chat?")) createNewSession(); });
 
-clearChatBtn.addEventListener('click', () => {
-    if (confirm("Are you sure you want to clear this chat?")) {
-        createNewSession();
-    }
-});
-
-// === SIDEBAR ===
 const sidebarOverlay = document.getElementById('sidebar-overlay');
 
 function openSidebar() {
-    if (window.innerWidth <= 1024) {
-        sidebar.classList.add('open');
-        sidebarOverlay.classList.add('active');
-    } else {
-        sidebar.classList.remove('closed');
-    }
-    if (typeof OXYPersistence !== 'undefined') {
-        OXYPersistence.setItem('oxy_sidebar_closed', false);
-    }
+    if (window.innerWidth <= 1024) { sidebar.classList.add('open'); sidebarOverlay.classList.add('active'); }
+    else { sidebar.classList.remove('closed'); }
+    if (typeof OXYPersistence !== 'undefined') OXYPersistence.setItem('oxy_sidebar_closed', false);
 }
 function closeSidebar() {
-    if (window.innerWidth <= 1024) {
-        sidebar.classList.remove('open');
-        sidebarOverlay.classList.remove('active');
-    } else {
-        sidebar.classList.add('closed');
-    }
-    if (typeof OXYPersistence !== 'undefined') {
-        OXYPersistence.setItem('oxy_sidebar_closed', true);
-    }
+    if (window.innerWidth <= 1024) { sidebar.classList.remove('open'); sidebarOverlay.classList.remove('active'); }
+    else { sidebar.classList.add('closed'); }
+    if (typeof OXYPersistence !== 'undefined') OXYPersistence.setItem('oxy_sidebar_closed', true);
 }
 function isSidebarOpen() {
     if (window.innerWidth <= 1024) return sidebar.classList.contains('open');
@@ -341,10 +271,7 @@ function isSidebarOpen() {
 
 const sidebarToggleBtn = document.getElementById('sidebar-toggle-btn');
 sidebarToggleBtn.addEventListener('click', () => { isSidebarOpen() ? closeSidebar() : openSidebar(); });
-
-if (mobileMenuBtn) {
-    mobileMenuBtn.addEventListener('click', () => { isSidebarOpen() ? closeSidebar() : openSidebar(); });
-}
+if (mobileMenuBtn) mobileMenuBtn.addEventListener('click', () => { isSidebarOpen() ? closeSidebar() : openSidebar(); });
 
 document.addEventListener('click', (e) => {
     if (!isSidebarOpen()) return;
@@ -354,55 +281,26 @@ document.addEventListener('click', (e) => {
     if (sidebarOverlay?.contains(e.target)) return;
     closeSidebar();
 });
-
 sidebarOverlay?.addEventListener('click', closeSidebar);
 
-// === RESIZE LISTENER ===
-// Sync sidebar state when crossing the tablet/desktop breakpoint
 let _lastIsTablet = null;
 window.addEventListener('resize', () => {
     const isTablet = window.innerWidth <= 1024;
     if (_lastIsTablet === null) { _lastIsTablet = isTablet; return; }
     if (isTablet !== _lastIsTablet) {
         _lastIsTablet = isTablet;
-        if (isTablet) {
-            // Switched to tablet/mobile — close the drawer
-            sidebar.classList.remove('open');
-            sidebarOverlay.classList.remove('active');
-            document.body.style.overflow = '';
-        } else {
-            // Switched to desktop — remove drawer-specific state
-            sidebar.classList.remove('open');
-            sidebarOverlay.classList.remove('active');
-            document.body.style.overflow = '';
-            sidebar.classList.remove('closed');
-        }
+        if (isTablet) { sidebar.classList.remove('open'); sidebarOverlay.classList.remove('active'); document.body.style.overflow = ''; }
+        else { sidebar.classList.remove('open'); sidebarOverlay.classList.remove('active'); document.body.style.overflow = ''; sidebar.classList.remove('closed'); }
     }
 });
 
-// === ATTACHMENT MENU ===
 let attachMenuOpen = false;
 
-function toggleAttachMenu(e) {
-    if (e) e.stopPropagation();
-    attachMenuOpen = !attachMenuOpen;
-    attachMenu.classList.toggle('visible', attachMenuOpen);
-}
-
-function closeAttachMenu() {
-    attachMenuOpen = false;
-    attachMenu.classList.remove('visible');
-}
+function toggleAttachMenu(e) { if (e) e.stopPropagation(); attachMenuOpen = !attachMenuOpen; attachMenu.classList.toggle('visible', attachMenuOpen); }
+function closeAttachMenu() { attachMenuOpen = false; attachMenu.classList.remove('visible'); }
 
 attachBtn.addEventListener('click', toggleAttachMenu);
-
-document.addEventListener('click', (e) => {
-    if (attachMenuOpen && !attachMenuContainer.contains(e.target)) {
-        closeAttachMenu();
-    }
-});
-
-// Escape key closes menus and modals
+document.addEventListener('click', (e) => { if (attachMenuOpen && !attachMenuContainer.contains(e.target)) closeAttachMenu(); });
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
         if (attachMenuOpen) { closeAttachMenu(); return; }
@@ -413,83 +311,54 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
-// Menu items
-menuAddFiles.addEventListener('click', () => {
-    closeAttachMenu();
-    fileInput.click();
-});
+menuAddFiles.addEventListener('click', () => { closeAttachMenu(); fileInput.click(); });
+menuScreenshot.addEventListener('click', () => { closeAttachMenu(); captureScreenshot(); });
+menuCamera.addEventListener('click', () => { closeAttachMenu(); openCamera(); });
+menuRecent.addEventListener('click', () => { closeAttachMenu(); openRecentFilesModal(); });
 
-menuScreenshot.addEventListener('click', () => {
-    closeAttachMenu();
-    captureScreenshot();
-});
-
-menuCamera.addEventListener('click', () => {
-    closeAttachMenu();
-    openCamera();
-});
-
-menuRecent.addEventListener('click', () => {
-    closeAttachMenu();
-    openRecentFilesModal();
-});
-
-// === FILE INPUT HANDLER ===
 fileInput.addEventListener('change', (e) => {
     if (e.target.files.length > 0) {
+        const sendBtn = document.getElementById('send-btn');
+        const msgInput = document.getElementById('message-input');
+        sendBtn.disabled = true;
+        msgInput.disabled = true;
         addFilesToPending(e.target.files);
+        uploadFiles(e.target.files).finally(() => { sendBtn.disabled = false; msgInput.disabled = false; });
         e.target.value = '';
     }
 });
 
-// === FILE MANAGEMENT ===
+async function uploadFiles(files) {
+    console.log('Uploading files...', files);
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    return true;
+}
+
 function addFilesToPending(fileList) {
-    const maxSize = 50 * 1024 * 1024; // 50MB
+    const maxSize = 50 * 1024 * 1024;
     const maxTotal = 10;
     const errors = [];
-
     for (const file of fileList) {
-        if (pendingFiles.length >= maxTotal) {
-            errors.push(`Maximum ${maxTotal} files allowed`);
-            break;
-        }
-        
-        if (file.type.startsWith('video/') && file.size > 3 * 1024 * 1024) {
-            errors.push(`Video "${file.name}" is too large (max 3MB)`);
-            continue;
-        } else if (file.size > maxSize) {
-            errors.push(`"${file.name}" is too large (max 50MB)`);
-            continue;
-        }
-        
-        if (file.size === 0) {
-            errors.push(`"${file.name}" is empty`);
-            continue;
-        }
+        if (pendingFiles.length >= maxTotal) { errors.push(`Maximum ${maxTotal} files allowed`); break; }
+        if (file.size > maxSize) { errors.push(`"${file.name}" is too large (max 50MB)`); continue; }
+        if (file.size === 0) { errors.push(`"${file.name}" is empty`); continue; }
         const id = ++fileIdCounter;
         const preview = generatePreview(file);
         pendingFiles.push({ id, file, preview, name: file.name, size: file.size, type: file.type });
     }
-
     if (errors.length > 0) showToast(errors[0], 'warning');
     updateFilePreviewStrip();
     updateSendButton();
 }
 
 function generatePreview(file) {
-    if (file.type.startsWith('image/')) {
-        return URL.createObjectURL(file);
-    }
-    if (file.type.startsWith('video/')) {
-        return URL.createObjectURL(file);
-    }
+    if (file.type.startsWith('image/')) return URL.createObjectURL(file);
     return null;
 }
 
 function getFileIcon(type, name) {
     const ext = name?.split('.').pop()?.toLowerCase();
     if (type?.startsWith('image/')) return 'fa-file-image';
-    if (type?.startsWith('video/')) return 'fa-file-video';
     if (type === 'application/pdf') return 'fa-file-pdf';
     if (type?.includes('zip') || ext === 'zip') return 'fa-file-zipper';
     if (type?.includes('word') || ext === 'docx') return 'fa-file-word';
@@ -503,7 +372,6 @@ function getFileIcon(type, name) {
 function getFileColor(type, name) {
     const ext = name?.split('.').pop()?.toLowerCase();
     if (type?.startsWith('image/')) return '#a855f7';
-    if (type?.startsWith('video/')) return '#f97316';
     if (type === 'application/pdf') return '#ef4444';
     if (type?.includes('zip') || ext === 'zip') return '#eab308';
     if (['js','ts','html','css','py','java','cpp','c'].includes(ext)) return '#22c55e';
@@ -533,45 +401,25 @@ function clearPendingFiles() {
 }
 
 function updateFilePreviewStrip() {
-    if (pendingFiles.length === 0) {
-        filePreviewStrip.style.display = 'none';
-        filePreviewStrip.innerHTML = '';
-        return;
-    }
+    if (pendingFiles.length === 0) { filePreviewStrip.style.display = 'none'; filePreviewStrip.innerHTML = ''; return; }
     filePreviewStrip.style.display = 'flex';
     filePreviewStrip.innerHTML = pendingFiles.map(f => {
         const icon = getFileIcon(f.type, f.name);
         const color = getFileColor(f.type, f.name);
         const size = formatFileSize(f.size);
-        const thumbHtml = f.preview
-            ? f.type.startsWith('video/')
-                ? `<video src="${f.preview}" class="preview-thumb" muted preload="metadata"></video>`
-                : `<img src="${f.preview}" class="preview-thumb" alt="" loading="lazy">`
-            : `<div class="preview-icon-bg" style="background:${color}20;color:${color}"><i class="fa-solid ${icon}"></i></div>`;
-        return `
-            <div class="preview-item" data-id="${f.id}">
-                <button class="preview-remove" onclick="removePendingFile(${f.id})">
-                    <i class="fa-solid fa-xmark"></i>
-                </button>
-                <div class="preview-thumb-wrap">
-                    ${thumbHtml}
-                </div>
-                <div class="preview-info">
-                    <span class="preview-name">${f.name.length > 20 ? f.name.substring(0, 18) + '…' : f.name}</span>
-                    <span class="preview-size">${size}</span>
-                </div>
-            </div>
-        `;
+        const thumbHtml = f.preview ? `<img src="${f.preview}" class="preview-thumb" alt="" loading="lazy">` : `<div class="preview-icon-bg" style="background:${color}20;color:${color}"><i class="fa-solid ${icon}"></i></div>`;
+        return `<div class="preview-item" data-id="${f.id}">
+            <button class="preview-remove" onclick="removePendingFile(${f.id})"><i class="fa-solid fa-xmark"></i></button>
+            <div class="preview-thumb-wrap">${thumbHtml}</div>
+            <div class="preview-info"><span class="preview-name">${f.name.length > 20 ? f.name.substring(0, 18) + '…' : f.name}</span><span class="preview-size">${size}</span></div>
+        </div>`;
     }).join('');
 }
 
 function setUploadingState(uploading) {
     isUploading = uploading;
     if (inputWrapper) inputWrapper.classList.toggle('uploading', uploading);
-    // Add shimmer to preview items
-    document.querySelectorAll('.preview-item').forEach(item => {
-        item.classList.toggle('uploading', uploading);
-    });
+    document.querySelectorAll('.preview-item').forEach(item => item.classList.toggle('uploading', uploading));
 }
 
 function updateSendButton() {
@@ -580,79 +428,27 @@ function updateSendButton() {
     sendBtn.disabled = !(hasText || hasFiles) || isUploading || isProcessingFiles;
 }
 
-// === DRAG & DROP ===
 let dragCounter = 0;
-
-chatContainer.addEventListener('dragenter', (e) => {
-    e.preventDefault();
-    dragCounter++;
-    dropZoneOverlay.classList.add('visible');
-});
-
-chatContainer.addEventListener('dragover', (e) => {
-    e.preventDefault();
-});
-
-chatContainer.addEventListener('dragleave', (e) => {
-    e.preventDefault();
-    dragCounter--;
-    if (dragCounter <= 0) {
-        dragCounter = 0;
-        dropZoneOverlay.classList.remove('visible');
-    }
-});
-
-chatContainer.addEventListener('drop', (e) => {
-    e.preventDefault();
-    dragCounter = 0;
-    dropZoneOverlay.classList.remove('visible');
-    if (e.dataTransfer.files.length > 0) {
-        addFilesToPending(e.dataTransfer.files);
-    }
-});
-
-// Also support drop on the entire main area
+chatContainer.addEventListener('dragenter', (e) => { e.preventDefault(); dragCounter++; dropZoneOverlay.classList.add('visible'); });
+chatContainer.addEventListener('dragover', (e) => e.preventDefault());
+chatContainer.addEventListener('dragleave', (e) => { e.preventDefault(); dragCounter--; if (dragCounter <= 0) { dragCounter = 0; dropZoneOverlay.classList.remove('visible'); } });
+chatContainer.addEventListener('drop', (e) => { e.preventDefault(); dragCounter = 0; dropZoneOverlay.classList.remove('visible'); if (e.dataTransfer.files.length > 0) addFilesToPending(e.dataTransfer.files); });
 document.querySelector('.chat-main')?.addEventListener('dragover', (e) => e.preventDefault());
-document.querySelector('.chat-main')?.addEventListener('drop', (e) => {
-    e.preventDefault();
-    dragCounter = 0;
-    dropZoneOverlay.classList.remove('visible');
-    if (e.dataTransfer.files.length > 0) {
-        addFilesToPending(e.dataTransfer.files);
-    }
-});
+document.querySelector('.chat-main')?.addEventListener('drop', (e) => { e.preventDefault(); dragCounter = 0; dropZoneOverlay.classList.remove('visible'); if (e.dataTransfer.files.length > 0) addFilesToPending(e.dataTransfer.files); });
 
-// === CLIPBOARD PASTE (Global — Ctrl+V from anywhere) ===
 document.addEventListener('paste', async (e) => {
-    // Don't intercept if pasting text into textarea (no images in clipboard)
     const items = e.clipboardData?.items;
     if (!items) return;
-
     const imageItems = [];
-    for (const item of items) {
-        if (item.type.startsWith('image/')) {
-            imageItems.push(item);
-        }
-    }
-
+    for (const item of items) { if (item.type.startsWith('image/')) imageItems.push(item); }
     if (imageItems.length > 0) {
         e.preventDefault();
-        const files = await Promise.all(imageItems.map(async (item) => {
-            const blob = item.getAsFile();
-            if (blob) {
-                return new File([blob], `pasted-image-${Date.now()}.png`, { type: blob.type });
-            }
-            return null;
-        }));
+        const files = await Promise.all(imageItems.map(async (item) => { const blob = item.getAsFile(); if (blob) return new File([blob], `pasted-image-${Date.now()}.png`, { type: blob.type }); return null; }));
         const validFiles = files.filter(Boolean);
-        if (validFiles.length > 0) {
-            addFilesToPending(validFiles);
-            showToast('Image pasted from clipboard', 'success');
-        }
+        if (validFiles.length > 0) { addFilesToPending(validFiles); showToast('Image pasted from clipboard', 'success'); }
     }
 });
 
-// === SCREENSHOT CAPTURE ===
 async function captureScreenshot() {
     try {
         const stream = await navigator.mediaDevices.getDisplayMedia({ preferCurrentTab: true });
@@ -660,134 +456,62 @@ async function captureScreenshot() {
         const imgCapture = new ImageCapture(track);
         const bitmap = await imgCapture.grabFrame();
         track.stop();
-
         const canvas = document.createElement('canvas');
-        canvas.width = bitmap.width;
-        canvas.height = bitmap.height;
+        canvas.width = bitmap.width; canvas.height = bitmap.height;
         const ctx = canvas.getContext('2d');
         ctx.drawImage(bitmap, 0, 0);
-        
         const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/png'));
-        if (blob) {
-            const file = new File([blob], `screenshot-${Date.now()}.png`, { type: 'image/png' });
-            addFilesToPending([file]);
-            showToast('Screenshot captured!', 'success');
-        }
-    } catch (err) {
-        if (err.name !== 'NotAllowedError' && err.name !== 'AbortError') {
-            showToast('Screenshot failed. Try pasting with Ctrl+V instead.', 'error');
-        }
-    }
+        if (blob) { const file = new File([blob], `screenshot-${Date.now()}.png`, { type: 'image/png' }); addFilesToPending([file]); showToast('Screenshot captured!', 'success'); }
+    } catch (err) { if (err.name !== 'NotAllowedError' && err.name !== 'AbortError') showToast('Screenshot failed. Try pasting with Ctrl+V instead.', 'error'); }
 }
 
-// === CAMERA CAPTURE ===
 async function openCamera() {
     try {
         cameraModal.style.display = 'flex';
-        cameraStream = await navigator.mediaDevices.getUserMedia({
-            video: { facingMode: cameraFacingMode, width: { ideal: 1280 }, height: { ideal: 720 } },
-            audio: false
-        });
+        cameraStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: cameraFacingMode, width: { ideal: 1280 }, height: { ideal: 720 } }, audio: false });
         cameraPreview.srcObject = cameraStream;
-    } catch (err) {
-        cameraModal.style.display = 'none';
-        showToast('Camera access denied. Please allow camera permissions.', 'error');
-    }
+    } catch (err) { cameraModal.style.display = 'none'; showToast('Camera access denied. Please allow camera permissions.', 'error'); }
 }
 
-function closeCamera() {
-    if (cameraStream) {
-        cameraStream.getTracks().forEach(t => t.stop());
-        cameraStream = null;
-    }
-    cameraPreview.srcObject = null;
-    cameraModal.style.display = 'none';
-}
-
+function closeCamera() { if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); cameraStream = null; } cameraPreview.srcObject = null; cameraModal.style.display = 'none'; }
 cameraCloseBtn.addEventListener('click', closeCamera);
-
-cameraFlipBtn.addEventListener('click', () => {
-    cameraFacingMode = cameraFacingMode === 'user' ? 'environment' : 'user';
-    if (cameraStream) {
-        cameraStream.getTracks().forEach(t => t.stop());
-    }
-    openCamera();
-});
-
+cameraFlipBtn.addEventListener('click', () => { cameraFacingMode = cameraFacingMode === 'user' ? 'environment' : 'user'; if (cameraStream) cameraStream.getTracks().forEach(t => t.stop()); openCamera(); });
 cameraCaptureBtn.addEventListener('click', () => {
     const canvas = cameraCanvas;
-    canvas.width = cameraPreview.videoWidth;
-    canvas.height = cameraPreview.videoHeight;
+    canvas.width = cameraPreview.videoWidth; canvas.height = cameraPreview.videoHeight;
     const ctx = canvas.getContext('2d');
-    // Flip horizontally if using front camera
-    if (cameraFacingMode === 'user') {
-        ctx.translate(canvas.width, 0);
-        ctx.scale(-1, 1);
-    }
+    if (cameraFacingMode === 'user') { ctx.translate(canvas.width, 0); ctx.scale(-1, 1); }
     ctx.drawImage(cameraPreview, 0, 0);
     canvas.toBlob((blob) => {
-        if (blob) {
-            const file = new File([blob], `camera-${Date.now()}.jpg`, { type: 'image/jpeg' });
-            addFilesToPending([file]);
-            showToast('Photo captured!', 'success');
-        }
+        if (blob) { const file = new File([blob], `camera-${Date.now()}.jpg`, { type: 'image/jpeg' }); addFilesToPending([file]); showToast('Photo captured!', 'success'); }
         closeCamera();
     }, 'image/jpeg', 0.92);
 });
 
-// === RECENT FILES MODAL ===
 function openRecentFilesModal() {
     const recent = getRecentFiles();
     recentFilesBody.innerHTML = '';
-
     if (recent.length === 0) {
-        recentFilesBody.innerHTML = `
-            <div class="recent-files-empty">
-                <i class="fa-solid fa-folder-open"></i>
-                <span>No recent files yet</span>
-            </div>
-        `;
+        recentFilesBody.innerHTML = '<div class="recent-files-empty"><i class="fa-solid fa-folder-open"></i><span>No recent files yet</span></div>';
     } else {
         recent.forEach((file, idx) => {
             const icon = getFileIcon(file.type, file.name);
             const color = getFileColor(file.type, file.name);
-            const size = formatFileSize(file.size);
-            const timeAgo = getTimeAgo(file.addedAt);
-
+            const size = formatFileSize(file.size); const timeAgo = getTimeAgo(file.addedAt);
             const item = document.createElement('div');
             item.className = 'recent-file-item';
-            item.innerHTML = `
-                <div class="recent-file-icon" style="background:${color}18;color:${color}">
-                    <i class="fa-solid ${icon}"></i>
-                </div>
-                <div class="recent-file-info">
-                    <div class="recent-file-name">${file.name}</div>
-                    <div class="recent-file-meta">${size} · ${timeAgo}</div>
-                </div>
-            `;
-            item.addEventListener('click', () => {
-                closeRecentFilesModal();
-                // Trigger file picker so user can re-select the file
-                fileInput.click();
-                showToast(`Select "${file.name}" from your files`, 'info');
-            });
+            item.innerHTML = `<div class="recent-file-icon" style="background:${color}18;color:${color}"><i class="fa-solid ${icon}"></i></div>
+                <div class="recent-file-info"><div class="recent-file-name">${file.name}</div><div class="recent-file-meta">${size} · ${timeAgo}</div></div>`;
+            item.addEventListener('click', () => { closeRecentFilesModal(); fileInput.click(); showToast(`Select "${file.name}" from your files`, 'info'); });
             recentFilesBody.appendChild(item);
         });
     }
-
     recentFilesModal.style.display = 'flex';
 }
 
-function closeRecentFilesModal() {
-    recentFilesModal.style.display = 'none';
-}
-
+function closeRecentFilesModal() { recentFilesModal.style.display = 'none'; }
 recentFilesCloseBtn.addEventListener('click', closeRecentFilesModal);
-
-// Click outside to close recent files modal
-recentFilesModal.addEventListener('click', (e) => {
-    if (e.target === recentFilesModal) closeRecentFilesModal();
-});
+recentFilesModal.addEventListener('click', (e) => { if (e.target === recentFilesModal) closeRecentFilesModal(); });
 
 function getTimeAgo(timestamp) {
     const diff = Date.now() - timestamp;
@@ -801,122 +525,54 @@ function getTimeAgo(timestamp) {
     return `${days}d ago`;
 }
 
-// === LIGHTBOX (ChatGPT-style image preview) ===
 function openLightbox(images, startIndex = 0) {
     if (!images || images.length === 0) return;
-    lightboxImages = images;
-    lightboxCurrentIndex = startIndex;
+    lightboxImages = images; lightboxCurrentIndex = startIndex;
     showLightboxImage();
     lightboxModal.classList.add('open');
     document.body.style.overflow = 'hidden';
 }
 
 function showLightboxImage() {
-    const img = lightboxImages[lightboxCurrentIndex];
-    if (!img) return;
+    const img = lightboxImages[lightboxCurrentIndex]; if (!img) return;
     const src = img.url || img.preview || img.src;
-    lightboxImg.src = src;
-    lightboxImg.alt = img.name || 'Image';
-    
-    if (lightboxImages.length > 1) {
-        lightboxCounter.textContent = `${lightboxCurrentIndex + 1} / ${lightboxImages.length}`;
-        lightboxCounter.style.display = 'block';
-    } else {
-        lightboxCounter.style.display = 'none';
-    }
-    
-    lightboxDownload.onclick = () => {
-        const a = document.createElement('a');
-        a.href = src;
-        a.download = img.name || 'image';
-        a.click();
-    };
+    lightboxImg.src = src; lightboxImg.alt = img.name || 'Image';
+    if (lightboxImages.length > 1) { lightboxCounter.textContent = `${lightboxCurrentIndex + 1} / ${lightboxImages.length}`; lightboxCounter.style.display = 'block'; }
+    else { lightboxCounter.style.display = 'none'; }
+    lightboxDownload.onclick = () => { const a = document.createElement('a'); a.href = src; a.download = img.name || 'image'; a.click(); };
 }
 
-function closeLightbox() {
-    lightboxModal.classList.remove('open');
-    document.body.style.overflow = '';
-}
-
-// Lightbox keyboard navigation on global listener (already added above)
-// Click handlers
+function closeLightbox() { lightboxModal.classList.remove('open'); document.body.style.overflow = ''; }
 lightboxClose.addEventListener('click', closeLightbox);
-lightboxModal.addEventListener('click', (e) => {
-    if (e.target === lightboxModal) closeLightbox();
-});
-
-// Also listen for arrow keys for lightbox on the global keydown
+lightboxModal.addEventListener('click', (e) => { if (e.target === lightboxModal) closeLightbox(); });
 document.addEventListener('keydown', (e) => {
     if (!lightboxModal.classList.contains('open')) return;
-    if (e.key === 'ArrowLeft' && lightboxImages.length > 1) {
-        e.preventDefault();
-        lightboxCurrentIndex = (lightboxCurrentIndex - 1 + lightboxImages.length) % lightboxImages.length;
-        showLightboxImage();
-    }
-    if (e.key === 'ArrowRight' && lightboxImages.length > 1) {
-        e.preventDefault();
-        lightboxCurrentIndex = (lightboxCurrentIndex + 1) % lightboxImages.length;
-        showLightboxImage();
-    }
+    if (e.key === 'ArrowLeft' && lightboxImages.length > 1) { e.preventDefault(); lightboxCurrentIndex = (lightboxCurrentIndex - 1 + lightboxImages.length) % lightboxImages.length; showLightboxImage(); }
+    if (e.key === 'ArrowRight' && lightboxImages.length > 1) { e.preventDefault(); lightboxCurrentIndex = (lightboxCurrentIndex + 1) % lightboxImages.length; showLightboxImage(); }
 });
 
-// === ChatGPT-style file attachments builder ===
 function buildFileAttachments(files) {
     const attachGrid = document.createElement('div');
     attachGrid.className = 'msg-attachments-grid';
     if (files.length > 1) attachGrid.classList.add('multiple-attachments');
-
     const imageFiles = files.filter(f => f.type?.startsWith('image/'));
-
     files.forEach((f) => {
         let attachEl;
-
         if (f.type?.startsWith('image/') && (f.url || f.preview)) {
             attachEl = document.createElement('img');
             attachEl.className = 'msg-attach-img';
             if (imageFiles.length >= 3) attachEl.classList.add('small-multi');
             attachEl.src = f.url || f.preview;
-            attachEl.alt = f.name;
-            attachEl.loading = 'lazy';
+            attachEl.alt = f.name; attachEl.loading = 'lazy';
             attachEl.style.cursor = 'pointer';
             const imgIndex = imageFiles.indexOf(f);
-            attachEl.addEventListener('click', (e) => {
-                e.stopPropagation();
-                openLightbox(imageFiles, Math.max(0, imgIndex));
-            });
-
-        } else if (f.type?.startsWith('video/') && (f.url || f.preview)) {
-            attachEl = document.createElement('video');
-            attachEl.className = 'msg-attach-video';
-            attachEl.src = f.url || f.preview;
-            attachEl.controls = true;
-            attachEl.preload = 'metadata';
-            // Error handling: if the video cannot be loaded, show a fallback message
-            attachEl.addEventListener('error', function onVideoError() {
-                console.warn('[Video] Failed to load:', this.src);
-                this.removeEventListener('error', onVideoError);
-                // Replace the video element with a fallback UI
-                const fallback = document.createElement('div');
-                fallback.className = 'msg-attach-video-fallback';
-                fallback.innerHTML = `
-                    <div style="display:flex;align-items:center;gap:10px;padding:16px;background:#1a1a24;border-radius:10px;border:1px solid #2a2a3a;">
-                        <i class="fa-solid fa-circle-exclamation" style="color:#f97316;font-size:20px;"></i>
-                        <div>
-                            <div style="color:#e8e8ed;font-weight:500;">${f.name}</div>
-                            <div style="color:#8a8a9a;font-size:13px;">${formatFileSize(f.size)} — Video preview not available</div>
-                        </div>
-                    </div>
-                `;
-                this.parentNode.replaceChild(fallback, this);
-            });
+            attachEl.addEventListener('click', (e) => { e.stopPropagation(); openLightbox(imageFiles, Math.max(0, imgIndex)); });
         } else {
             attachEl = document.createElement('div');
             attachEl.className = 'msg-attach-file-card';
-            
             const icon = getFileIcon(f.type, f.name);
             const color = getFileColor(f.type, f.name);
             const size = formatFileSize(f.size);
-            
             let actionsHtml = '';
             if (f.url) {
                 if (f.type === 'application/pdf') {
@@ -926,32 +582,13 @@ function buildFileAttachments(files) {
                 }
                 actionsHtml += `<button class="file-card-btn" onclick="event.stopPropagation();window.open('${f.url}','_blank')" title="Download"><i class="fa-solid fa-download"></i></button>`;
             }
-            
-            attachEl.innerHTML = `
-                <div class="file-card-icon" style="background:${color}20;color:${color}">
-                    <i class="fa-solid ${icon}"></i>
-                </div>
-                <div class="file-card-info">
-                    <span class="file-card-name">${f.name}</span>
-                    <span class="file-card-meta">${size}</span>
-                </div>
-                <div class="file-card-actions">${actionsHtml}</div>
-            `;
-            
-            if (f.url) {
-                attachEl.style.cursor = 'pointer';
-                attachEl.addEventListener('click', () => window.open(f.url, '_blank'));
-            }
+            attachEl.innerHTML = `<div class="file-card-icon" style="background:${color}20;color:${color}"><i class="fa-solid ${icon}"></i></div>
+                <div class="file-card-info"><span class="file-card-name">${f.name}</span><span class="file-card-meta">${size}</span></div>
+                <div class="file-card-actions">${actionsHtml}</div>`;
+            if (f.url) { attachEl.style.cursor = 'pointer'; attachEl.addEventListener('click', () => window.open(f.url, '_blank')); }
         }
-
-        if (attachEl) {
-            const wrapper = document.createElement('div');
-            wrapper.className = 'msg-attachment';
-            wrapper.appendChild(attachEl);
-            attachGrid.appendChild(wrapper);
-        }
+        if (attachEl) { const wrapper = document.createElement('div'); wrapper.className = 'msg-attachment'; wrapper.appendChild(attachEl); attachGrid.appendChild(wrapper); }
     });
-
     return attachGrid;
 }
 
@@ -959,348 +596,156 @@ function appendMessage(text, sender, finalRender = true, files = null) {
     const msgDiv = document.createElement('div');
     msgDiv.className = `message ${sender}`;
     msgDiv.dataset.messageText = text;
-
     const avatar = document.createElement('div');
     avatar.className = 'message-avatar';
     if (sender === 'user') {
         const displayName = userName || 'User';
         const initials = displayName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
         avatar.textContent = initials;
-    } else {
-        avatar.innerHTML = '<div class="logo-ring msg-ring"><div class="logo-ring-glow"></div></div>';
-    }
-
+    } else { avatar.innerHTML = '<div class="logo-ring msg-ring"><div class="logo-ring-glow"></div></div>'; }
     const content = document.createElement('div');
     content.className = 'message-content';
-
-    // ChatGPT-style file attachments
-    if (files && files.length > 0) {
-        const attachGrid = buildFileAttachments(files);
-        content.appendChild(attachGrid);
-    }
-
+    if (files && files.length > 0) { const attachGrid = buildFileAttachments(files); content.appendChild(attachGrid); }
     if (sender === 'user') {
-        if (text && finalRender) {
-            const textEl = document.createElement('div');
-            textEl.className = 'msg-text-content';
-            textEl.textContent = text;
-            content.appendChild(textEl);
-        }
-    } else {
-        if (finalRender && text) {
-            // Check if the response is a structured widget (JSON)
-            const widgetResult = OXYWidgetRenderer.detectAndRender(text);
-            if (widgetResult) {
-                const widgetWrap = document.createElement('div');
-                widgetWrap.className = 'oxy-widget-container';
-                widgetWrap.innerHTML = widgetResult.html;
-                content.appendChild(widgetWrap);
-            } else {
-                const textWrap = document.createElement('div');
-                const rawHtml = marked.parse(text);
-                textWrap.innerHTML = DOMPurify.sanitize(rawHtml);
-                content.appendChild(textWrap);
-                formatCodeBlocks(content);
-            }
-        }
+        if (text && finalRender) { const textEl = document.createElement('div'); textEl.className = 'msg-text-content'; textEl.textContent = text; content.appendChild(textEl); }
+    } else if (finalRender && text) {
+        const widgetResult = OXYWidgetRenderer.detectAndRender(text);
+        if (widgetResult) { const widgetWrap = document.createElement('div'); widgetWrap.className = 'oxy-widget-container'; widgetWrap.innerHTML = widgetResult.html; content.appendChild(widgetWrap); }
+        else { const textWrap = document.createElement('div'); const rawHtml = marked.parse(text); textWrap.innerHTML = DOMPurify.sanitize(rawHtml); content.appendChild(textWrap); formatCodeBlocks(content); }
     }
-
     const contentWrapper = document.createElement('div');
     contentWrapper.className = 'message-content-wrapper';
-    contentWrapper.style.position = 'relative';
-    contentWrapper.style.display = 'flex';
-    contentWrapper.style.flexDirection = 'column';
-    contentWrapper.style.alignItems = sender === 'user' ? 'flex-end' : 'flex-start';
-    contentWrapper.style.flex = '1';
-    contentWrapper.style.minWidth = '0';
-    
+    contentWrapper.style.position = 'relative'; contentWrapper.style.display = 'flex'; contentWrapper.style.flexDirection = 'column';
+    contentWrapper.style.alignItems = sender === 'user' ? 'flex-end' : 'flex-start'; contentWrapper.style.flex = '1'; contentWrapper.style.minWidth = '0';
     contentWrapper.appendChild(content);
-
-    // Add message actions (Copy/Edit) for user messages
     if (sender === 'user') {
         const actionsDiv = document.createElement('div');
         actionsDiv.className = 'message-actions';
-        actionsDiv.innerHTML = `
-            <button class="msg-action-btn" onclick="copyMessage('${text.replace(/'/g, '\\x27')}')" title="Copy">
-                <i class="fa-regular fa-copy"></i>
-            </button>
-            <button class="msg-action-btn" onclick="editMessage(this)" title="Edit">
-                <i class="fa-solid fa-pen"></i>
-            </button>
-        `;
+        actionsDiv.innerHTML = `<button class="msg-action-btn" onclick="copyMessage('${text.replace(/'/g, '\\x27')}')" title="Copy"><i class="fa-regular fa-copy"></i></button>
+            <button class="msg-action-btn" onclick="editMessage(this)" title="Edit"><i class="fa-solid fa-pen"></i></button>`;
         contentWrapper.appendChild(actionsDiv);
     }
-
-    msgDiv.appendChild(avatar);
-    msgDiv.appendChild(contentWrapper);
-
+    msgDiv.appendChild(avatar); msgDiv.appendChild(contentWrapper);
     messagesWrapper.appendChild(msgDiv);
     chatContainer.scrollTop = chatContainer.scrollHeight;
     return msgDiv;
 }
 
-// === SEND MESSAGE (with files) ===
 function handleSend() {
     const text = messageInput.value.trim();
     if ((!text && pendingFiles.length === 0) || isGenerating || isUploading) return;
-
-    messageInput.value = '';
-    messageInput.style.height = 'auto';
-    sendBtn.disabled = true;
-
-    // Build file metadata for history (no raw [filename] text)
-    const filesForHistory = pendingFiles.map(f => {
-        addRecentFile({ name: f.name, type: f.type, size: f.size });
-        return { name: f.name, type: f.type, size: f.size, preview: f.preview };
-    });
-
-    // Store clean text only — no [filename] prefixes
-    currentChatHistory.push({
-        text: text,
-        sender: 'user',
-        files: filesForHistory
-    });
-
+    messageInput.value = ''; messageInput.style.height = 'auto'; sendBtn.disabled = true;
+    const filesForHistory = pendingFiles.map(f => { addRecentFile({ name: f.name, type: f.type, size: f.size }); return { name: f.name, type: f.type, size: f.size, preview: f.preview }; });
+    currentChatHistory.push({ text: text, sender: 'user', files: filesForHistory });
     renderHistory();
-    // If files exist, preprocess them first (upload to Gemini, poll to ACTIVE)
-    // then auto-send once all files are ready
-    if (pendingFiles.length > 0) {
-        preprocessAndSend(text, pendingFiles);
-    } else {
-        sendMessage(text, [], false);
-        clearPendingFiles();
-    }
+    if (pendingFiles.length > 0) preprocessAndSend(text, pendingFiles);
+    else { sendMessage(text, [], false); clearPendingFiles(); }
 }
 
-// === RENDER HISTORY ===
 function renderHistory() {
     messagesWrapper.innerHTML = '';
     welcomeScreen.style.display = currentChatHistory.length === 0 ? 'flex' : 'none';
-    currentChatHistory.forEach(msg => {
-        const msgDiv = appendMessage(msg.text, msg.sender, true, msg.files);
-    });
+    currentChatHistory.forEach(msg => { const msgDiv = appendMessage(msg.text, msg.sender, true, msg.files); });
     chatContainer.scrollTop = chatContainer.scrollHeight;
 }
 
-// === SEND TO API ===
-
-// === PREPROCESS FILES + AUTO-SEND (ChatGPT/Gemini-style upload) ===
 async function preprocessAndSend(text, files) {
     isProcessingFiles = true;
     setUploadingState(true);
     updateSendButton();
-
-// removed duplicate push to currentChatHistory
-
     const botMsgDiv = appendMessage('', 'bot', false);
     const contentDiv = botMsgDiv.querySelector('.message-content');
-
-    // Build per-file progress indicators
-    const fileItems = files.map(f => `
-        <div class="file-progress-item" style="padding:10px 0; border-bottom:1px solid #2a2a3a;">
-            <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
-                <div class="upload-spinner"></div>
-                <div style="flex:1;min-width:0;color:#e8e8ed;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${f.name}</div>
-                <div class="file-progress-pct" style="color:#a855f7;font-size:12px;font-weight:600;">0%</div>
-            </div>
-            <div class="upload-progress-bar">
-                <div class="upload-progress-fill" style="width: 0%"></div>
-            </div>
-            <div class="file-progress-status" style="color:#8a8a9a;font-size:11px;margin-top:4px;">Processing...</div>
+    const fileItems = files.map(f => `<div class="file-progress-item" style="padding:10px 0; border-bottom:1px solid #2a2a3a;">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
+            <div class="upload-spinner"></div>
+            <div style="flex:1;min-width:0;color:#e8e8ed;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${f.name}</div>
+            <div class="file-progress-pct" style="color:#a855f7;font-size:12px;font-weight:600;">0%</div>
         </div>
-    `).join('');
-
+        <div class="upload-progress-bar"><div class="upload-progress-fill" style="width: 0%"></div></div>
+        <div class="file-progress-status" style="color:#8a8a9a;font-size:11px;margin-top:4px;">Processing...</div>
+    </div>`).join('');
     contentDiv.innerHTML = '<div style="padding:12px;"><div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;"><div class="typing-indicator" style="display:inline-flex;"><span></span><span></span><span></span></div><span style="color:#8a8a9a;font-size:14px;">Processing files...</span></div><div class="file-progress-list">' + fileItems + '</div></div>';
-
-    if (!document.getElementById('oxy-upload-style')) {
-        const style = document.createElement('style');
-        style.id = 'oxy-upload-style';
-        style.textContent = '@keyframes spin { to { transform: rotate(360deg); } }';
-        document.head.appendChild(style);
-    }
-
+    if (!document.getElementById('oxy-upload-style')) { const style = document.createElement('style'); style.id = 'oxy-upload-style'; style.textContent = '@keyframes spin { to { transform: rotate(360deg); } }'; document.head.appendChild(style); }
     function updateFileProgress(name, status, progress, isError, errorMsg) {
-        const items = contentDiv.querySelectorAll('.file-progress-item');
-        let item = null;
-        for (const el of items) {
-            if (el.textContent.includes(name)) { item = el; break; }
-        }
+        const items = contentDiv.querySelectorAll('.file-progress-item'); let item = null;
+        for (const el of items) { if (el.textContent.includes(name)) { item = el; break; } }
         if (!item) return;
-        const spinner = item.querySelector('.upload-spinner');
-        const progressBar = item.querySelector('.upload-progress-fill');
-        const statusEl = item.querySelector('.file-progress-status');
-        const pctEl = item.querySelector('.file-progress-pct');
-
-        if (isError) {
-            if (spinner) spinner.style.display = 'none';
-            if (progressBar) progressBar.style.background = '#ef4444';
-            if (statusEl) statusEl.textContent = errorMsg ? 'Error: ' + errorMsg : 'Failed';
-            if (pctEl) pctEl.textContent = 'Error';
-        } else {
-            if (progressBar) progressBar.style.width = (progress || 0) + '%';
-            if (pctEl) pctEl.textContent = (progress || 0) + '%';
-            if (status === 'ready' || progress >= 100) {
-                if (spinner) spinner.style.display = 'none';
-                if (statusEl) statusEl.textContent = 'Ready';
-                if (pctEl) pctEl.textContent = '100%';
-            } else {
-                if (statusEl) statusEl.textContent = (status === 'uploading' ? 'Uploading...' : 'Processing...') + ' ' + (progress || 0) + '%';
-            }
-        }
+        const spinner = item.querySelector('.upload-spinner'); const progressBar = item.querySelector('.upload-progress-fill'); const statusEl = item.querySelector('.file-progress-status'); const pctEl = item.querySelector('.file-progress-pct');
+        if (isError) { if (spinner) spinner.style.display = 'none'; if (progressBar) progressBar.style.background = '#ef4444'; if (statusEl) statusEl.textContent = errorMsg ? 'Error: ' + errorMsg : 'Failed'; if (pctEl) pctEl.textContent = 'Error'; }
+        else { if (progressBar) progressBar.style.width = (progress || 0) + '%'; if (pctEl) pctEl.textContent = (progress || 0) + '%'; if (status === 'ready' || progress >= 100) { if (spinner) spinner.style.display = 'none'; if (statusEl) statusEl.textContent = 'Ready'; if (pctEl) pctEl.textContent = '100%'; } else { if (statusEl) statusEl.textContent = (status === 'uploading' ? 'Uploading...' : 'Processing...') + ' ' + (progress || 0) + '%'; } }
     }
-
     try {
         const formData = new FormData();
         for (const f of files) { formData.append('files', f.file, f.name); }
-
         const response = await fetch('/api/preprocess-files', { method: 'POST', body: formData });
-
         if (!response.ok) throw new Error('Preprocessing failed (HTTP ' + response.status + ')');
-
         const reader = response.body.getReader();
         const decoder = new TextDecoder('utf-8');
-        let buf = '';
-        const processedData = [];
-
+        let buf = ''; const processedData = [];
         while (true) {
             const { value, done } = await reader.read();
             if (done) break;
             buf += decoder.decode(value, { stream: true });
-            const lines = buf.split('\n');
-            buf = lines.pop();
-
+            const lines = buf.split('\n'); buf = lines.pop();
             for (const line of lines) {
                 if (!line.trim() || !line.startsWith('data: ')) continue;
-                try {
-                    const data = JSON.parse(line.substring(6));
-                    if (data.done) break;
-                    if (data.name) {
-                        if (data.status === 'saved') updateFileProgress(data.name, 'saved', 0);
-                        else if (data.status === 'uploading') updateFileProgress(data.name, 'uploading', data.progress || 0);
-                        else if (data.status === 'processing') updateFileProgress(data.name, 'processing', data.progress || 0);
-                        else if (data.status === 'ready') { updateFileProgress(data.name, 'ready', 100); processedData.push(data); }
-                        else if (data.status === 'failed') { updateFileProgress(data.name, 'failed', 0, true, data.error || 'Processing failed'); }
-                    }
-                } catch (e) {}
+                try { const data = JSON.parse(line.substring(6)); if (data.done) break; if (data.name) { if (data.status === 'saved') updateFileProgress(data.name, 'saved', 0); else if (data.status === 'uploading') updateFileProgress(data.name, 'uploading', data.progress || 0); else if (data.status === 'processing') updateFileProgress(data.name, 'processing', data.progress || 0); else if (data.status === 'ready') { updateFileProgress(data.name, 'ready', 100); processedData.push(data); } else if (data.status === 'failed') { updateFileProgress(data.name, 'failed', 0, true, data.error || 'Processing failed'); } } } catch (e) {}
             }
         }
-
         const readyFiles = processedData.filter(d => d.status === 'ready');
         if (readyFiles.length === 0) throw new Error('All files failed to process');
-
-        if (contentDiv) {
-            contentDiv.innerHTML = '<div style="padding:10px;color:#8a8a9a;font-size:13px;"><span style="color:#22c55e;">V</span> ' + readyFiles.length + ' file(s) ready' + (processedData.length > readyFiles.length ? ' (' + (processedData.length - readyFiles.length) + ' failed)' : '') + '</div>';
-        }
-
-        setUploadingState(false);
-        isProcessingFiles = false;
-
-        // Remove the progress bubble so sendMessage creates a clean bot bubble
+        if (contentDiv) contentDiv.innerHTML = '<div style="padding:10px;color:#8a8a9a;font-size:13px;"><span style="color:#22c55e;">V</span> ' + readyFiles.length + ' file(s) ready' + (processedData.length > readyFiles.length ? ' (' + (processedData.length - readyFiles.length) + ' failed)' : '') + '</div>';
+        setUploadingState(false); isProcessingFiles = false;
         if (botMsgDiv && botMsgDiv.parentNode) botMsgDiv.parentNode.removeChild(botMsgDiv);
-
         clearPendingFiles();
         await sendMessage(text, [], false, processedData);
-
     } catch (error) {
         console.error('[Preprocess] Error:', error);
-        if (contentDiv) { contentDiv.innerHTML = '<span style="color:#ef4444;padding:12px;">X File processing error: ' + error.message + '</span>'; }
-        setUploadingState(false);
-        isProcessingFiles = false;
-        updateSendButton();
+        if (contentDiv) contentDiv.innerHTML = '<span style="color:#ef4444;padding:12px;">X File processing error: ' + error.message + '</span>';
+        setUploadingState(false); isProcessingFiles = false; updateSendButton();
     }
 }
 
-
 async function sendMessage(text, files, isRegenerate = false, processedFiles = null) {
     isGenerating = true;
-    regenBtn.style.display = 'none';
-    stopBtn.style.display = 'flex';
-
-    if (welcomeScreen.style.display !== 'none') {
-        welcomeScreen.style.display = 'none';
-    }
-
+    regenBtn.style.display = 'none'; stopBtn.style.display = 'flex';
+    if (welcomeScreen.style.display !== 'none') welcomeScreen.style.display = 'none';
     chatContainer.scrollTop = chatContainer.scrollHeight;
-
     const botMsgDiv = appendMessage('', 'bot', false);
     const contentDiv = botMsgDiv.querySelector('.message-content');
     contentDiv.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
-
     abortController = new AbortController();
     let fullResponse = '';
-
-    // Show uploading state if files are present
     const hasFiles = (files && files.length > 0) || (processedFiles && processedFiles.length > 0);
     if (hasFiles) setUploadingState(true);
-
     try {
         let response;
-
         if (hasFiles) {
             const formData = new FormData();
-            formData.append('message', text || '');
-            formData.append('sessionId', currentSessionId);
-            formData.append('userName', userName);
-            formData.append('userGender', userGender);
-            formData.append('userLocation', userLocation || '');
-            formData.append('model', 'gemini-2.5-flash');
-            formData.append('temperature', '0.7');
-            if (processedFiles && processedFiles.length > 0) {
-                formData.append('processedFiles', JSON.stringify(processedFiles));
-            } else {
-                for (const f of files) {
-                    formData.append('files', f.file, f.name);
-                }
-            }
-
-            response = await fetch('/api/chat', {
-                method: 'POST',
-                body: formData,
-                signal: abortController.signal
-            });
+            formData.append('message', text || ''); formData.append('sessionId', currentSessionId); formData.append('userName', userName);
+            formData.append('userGender', userGender); formData.append('userLocation', userLocation || ''); formData.append('model', 'gemini-2.5-flash'); formData.append('temperature', '0.7');
+            if (processedFiles && processedFiles.length > 0) { formData.append('processedFiles', JSON.stringify(processedFiles)); }
+            else { for (const f of files) formData.append('files', f.file, f.name); }
+            response = await fetch('/api/chat', { method: 'POST', body: formData, signal: abortController.signal });
         } else {
-            response = await fetch('/api/chat', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    message: text,
-                    sessionId: currentSessionId,
-                    userName: userName,
-                    userGender: userGender,
-                    userLocation: userLocation || '',
-                    model: 'gemini-2.5-flash',
-                    temperature: 0.7
-                }),
-                signal: abortController.signal
-            });
+            response = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text, sessionId: currentSessionId, userName, userGender, userLocation: userLocation || '', model: 'gemini-2.5-flash', temperature: 0.7 }), signal: abortController.signal });
         }
-
-        // Clear uploading state once response starts
         if (hasFiles) setUploadingState(false);
-
         if (!response.ok) {
             let errorMsg = 'Failed to get response';
-            try {
-                const errData = await response.json();
-                errorMsg = errData.error || errorMsg;
-            } catch(e) {}
+            try { const errData = await response.json(); errorMsg = errData.error || errorMsg; } catch(e) {}
             contentDiv.innerHTML = `<span style="color: #ef4444;">❌ Error: ${errorMsg}</span>`;
             fullResponse = errorMsg;
         } else {
             const reader = response.body.getReader();
             const decoder = new TextDecoder("utf-8");
-            let done = false;
-            let buffer = '';
-
+            let done = false; let buffer = '';
             while (!done) {
                 const { value, done: readerDone } = await reader.read();
                 done = readerDone;
                 if (value) {
-                    const chunk = decoder.decode(value, { stream: true });
-                    buffer += chunk;
-                    const lines = buffer.split('\n');
-                    buffer = lines.pop();
-
+                    const chunk = decoder.decode(value, { stream: true }); buffer += chunk;
+                    const lines = buffer.split('\n'); buffer = lines.pop();
                     for (const line of lines) {
                         if (line.trim() === '') continue;
                         if (line.startsWith('data: ')) {
@@ -1308,412 +753,120 @@ async function sendMessage(text, files, isRegenerate = false, processedFiles = n
                             if (dataStr === '[DONE]') { done = true; break; }
                             try {
                                 const data = JSON.parse(dataStr);
-                                // Handle file preview URLs from the server (permanent URLs for video/audio previews)
-                                if (data.filePreviewUrls) {
-                                    console.log('[Chat] Received file preview URLs:', data.filePreviewUrls);
-                                    // Update the rendered video elements to use permanent server URLs
-                                    // instead of revoked blob URLs
-                                    const videoElements = botMsgDiv.querySelectorAll('.msg-attach-video');
-                                    data.filePreviewUrls.forEach(preview => {
-                                        videoElements.forEach(vid => {
-                                            if (vid.src && vid.src.startsWith('blob:')) {
-                                                vid.src = preview.url;
-                                                vid.load();
-                                            }
-                                        });
-                                    });
-                                                    // Also update the user message's attachment if it has video
-                                    const userMsg = messagesWrapper.querySelector('.message.user:last-child');
-                                    if (userMsg) {
-                                        const userVideos = userMsg.querySelectorAll('.msg-attach-video');
-                                        data.filePreviewUrls.forEach(preview => {
-                                            userVideos.forEach(vid => {
-                                                if (vid.src && vid.src.startsWith('blob:')) {
-                                                    vid.src = preview.url;
-                                                    vid.load();
-                                                }
-                                            });
-                                        });
-                                    }
-                                    // Update chat history so reloads use permanent URLs
-                                    const lastHistoryIdx = currentChatHistory.length - 1;
-                                    if (lastHistoryIdx >= 0 && currentChatHistory[lastHistoryIdx].files) {
-                                        const historyFiles = currentChatHistory[lastHistoryIdx].files;
-                                        data.filePreviewUrls.forEach(preview => {
-                                            const match = historyFiles.find(f => f.name === preview.name);
-                                            if (match) {
-                                                match.url = preview.url; // Store permanent URL
-                                                // Keep the blob preview only if it hasn't been revoked yet
-                                                if (match.preview && match.preview.startsWith('blob:')) {
-                                                    delete match.preview;
-                                                }
-                                            }
-                                        });
-                                    }
-                                    continue;
-                                }
                                 if (data.text) {
                                     fullResponse += data.text;
-                                    // If the response looks like JSON, show a loading placeholder
-                                    // instead of rendering partial JSON as broken markdown
-                                    if (OXYWidgetRenderer.looksLikeJSON(fullResponse)) {
-                                        contentDiv.innerHTML = '<div class="widget-loading"><span class="widget-loading-dot"></span><span class="widget-loading-dot"></span><span class="widget-loading-dot"></span><span class="widget-loading-text">Building widget…</span></div>';
-                                    } else {
-                                        const rawHtml = marked.parse(fullResponse);
-                                        contentDiv.innerHTML = DOMPurify.sanitize(rawHtml);
-                                        formatCodeBlocks(contentDiv);
-                                    }
+                                    if (OXYWidgetRenderer.looksLikeJSON(fullResponse)) { contentDiv.innerHTML = '<div class="widget-loading"><span class="widget-loading-dot"></span><span class="widget-loading-dot"></span><span class="widget-loading-dot"></span><span class="widget-loading-text">Building widget…</span></div>'; }
+                                    else { const rawHtml = marked.parse(fullResponse); contentDiv.innerHTML = DOMPurify.sanitize(rawHtml); formatCodeBlocks(contentDiv); }
                                     chatContainer.scrollTop = chatContainer.scrollHeight;
-                                } else if (data.error) {
-                                    contentDiv.innerHTML += `<br><span style="color: #ef4444;">❌ ${data.error}</span>`;
-                                }
-                            } catch (parseErr) {
-                                // Skip malformed JSON chunks silently
-                            }
+                                } else if (data.error) { contentDiv.innerHTML += `<br><span style="color: #ef4444;">❌ ${data.error}</span>`; }
+                            } catch (parseErr) {}
                         }
                     }
                 }
             }
         }
-
-        // Only push to history if not regenerating (regenerate replaces last)
-        if (!isRegenerate) {
-            currentChatHistory.push({ text: fullResponse, sender: 'bot' });
-            saveSession();
-        } else if (isGenerating) {
-            currentChatHistory.push({ text: fullResponse, sender: 'bot' });
-            saveSession();
-        }
-
+        if (!isRegenerate) { currentChatHistory.push({ text: fullResponse, sender: 'bot' }); saveSession(); }
+        else if (isGenerating) { currentChatHistory.push({ text: fullResponse, sender: 'bot' }); saveSession(); }
     } catch (error) {
         if (hasFiles) setUploadingState(false);
-
-        if (error.name === 'AbortError') {
-            const stoppedMsg = fullResponse + '\n\n*(Stopped)*';
-            currentChatHistory.push({ text: stoppedMsg, sender: 'bot' });
-            saveSession();
-            fullResponse = stoppedMsg;
-        } else {
-            if (fullResponse) {
-                const interruptedMsg = fullResponse + '\n\n*(Connection lost)*';
-                contentDiv.innerHTML = DOMPurify.sanitize(marked.parse(interruptedMsg));
-                formatCodeBlocks(contentDiv);
-                currentChatHistory.push({ text: interruptedMsg, sender: 'bot' });
-                saveSession();
-                fullResponse = interruptedMsg;
-            } else {
-                contentDiv.innerHTML = '<span style="color: #ef4444;">❌ Network error. Please try again.</span>';
-                fullResponse = 'Network error';
-            }
+        if (error.name === 'AbortError') { const stoppedMsg = fullResponse + '\n\n*(Stopped)*'; currentChatHistory.push({ text: stoppedMsg, sender: 'bot' }); saveSession(); fullResponse = stoppedMsg; }
+        else {
+            if (fullResponse) { const interruptedMsg = fullResponse + '\n\n*(Connection lost)*'; contentDiv.innerHTML = DOMPurify.sanitize(marked.parse(interruptedMsg)); formatCodeBlocks(contentDiv); currentChatHistory.push({ text: interruptedMsg, sender: 'bot' }); saveSession(); fullResponse = interruptedMsg; }
+            else { contentDiv.innerHTML = '<span style="color: #ef4444;">❌ Network error. Please try again.</span>'; fullResponse = 'Network error'; }
             console.error('Chat error:', error);
         }
     } finally {
-            isGenerating = false;
-            isProcessingFiles = false;
-            stopBtn.style.display = 'none';
-            regenBtn.style.display = 'flex';
-            if (fullResponse) {
-                // Check if the final response is a widget (JSON)
-                const widgetResult = OXYWidgetRenderer.detectAndRender(fullResponse);
-                if (widgetResult) {
-                    contentDiv.innerHTML = `<div class="oxy-widget-container">${widgetResult.html}</div>`;
-                } else {
-                    const rawHtml = marked.parse(fullResponse);
-                    contentDiv.innerHTML = DOMPurify.sanitize(rawHtml);
-                    formatCodeBlocks(contentDiv);
-                }
-
-            }
-            chatContainer.scrollTop = chatContainer.scrollHeight;
-        }
-}
-
-// === STOP / REGEN ===
-function stopGeneration() {
-    if (abortController) {
-        abortController.abort();
-        isGenerating = false;
-        stopBtn.style.display = 'none';
-        regenBtn.style.display = 'flex';
-        saveSession();
+        isGenerating = false; isProcessingFiles = false; stopBtn.style.display = 'none'; regenBtn.style.display = 'flex';
+        if (fullResponse) { const widgetResult = OXYWidgetRenderer.detectAndRender(fullResponse); if (widgetResult) contentDiv.innerHTML = `<div class="oxy-widget-container">${widgetResult.html}</div>`; else { const rawHtml = marked.parse(fullResponse); contentDiv.innerHTML = DOMPurify.sanitize(rawHtml); formatCodeBlocks(contentDiv); } }
+        chatContainer.scrollTop = chatContainer.scrollHeight;
     }
 }
 
+function stopGeneration() { if (abortController) { abortController.abort(); isGenerating = false; stopBtn.style.display = 'none'; regenBtn.style.display = 'flex'; saveSession(); } }
 stopBtn.addEventListener('click', stopGeneration);
+regenBtn.addEventListener('click', () => { if (currentChatHistory.length >= 2 && currentChatHistory[currentChatHistory.length - 1].sender === 'bot') { currentChatHistory.pop(); const lastUserMsg = currentChatHistory[currentChatHistory.length - 1]; renderHistory(); sendMessage(lastUserMsg.text, [], true); } });
 
-regenBtn.addEventListener('click', () => {
-    if (currentChatHistory.length >= 2) {
-        const lastMsg = currentChatHistory[currentChatHistory.length - 1];
-        if (lastMsg.sender === 'bot') {
-            currentChatHistory.pop();
-            const lastUserMsg = currentChatHistory[currentChatHistory.length - 1];
-            renderHistory();
-            sendMessage(lastUserMsg.text, [], true);
-        }
-    }
-});
-
-// === KEYBOARD ===
-messageInput.addEventListener('input', function() {
-    this.style.height = 'auto';
-    this.style.height = (this.scrollHeight) + 'px';
-    this.style.overflowY = this.scrollHeight > 150 ? 'auto' : 'hidden';
-    updateSendButton();
-});
-
-messageInput.addEventListener('keydown', function(e) {
-    if (e.key === 'Enter' && !e.shiftKey) {
-        e.preventDefault();
-        if (!sendBtn.disabled && !isGenerating) handleSend();
-    }
-});
-
+messageInput.addEventListener('input', function() { this.style.height = 'auto'; this.style.height = (this.scrollHeight) + 'px'; this.style.overflowY = this.scrollHeight > 150 ? 'auto' : 'hidden'; updateSendButton(); });
+messageInput.addEventListener('keydown', function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!sendBtn.disabled && !isGenerating) handleSend(); } });
 sendBtn.addEventListener('click', handleSend);
 
-window.copyCode = function(btn) {
-    const wrapper = btn.closest('.code-block-wrapper');
-    const code = wrapper.querySelector('code').innerText;
-    navigator.clipboard.writeText(code).then(() => {
-        btn.classList.add('copied');
-        const originalHtml = btn.innerHTML;
-        btn.innerHTML = '<i class="fa-regular fa-clipboard"></i> Copied!';
-        setTimeout(() => { 
-            btn.classList.remove('copied');
-            btn.innerHTML = originalHtml; 
-        }, 2000);
-    });
-};
+window.copyCode = function(btn) { const wrapper = btn.closest('.code-block-wrapper'); const code = wrapper.querySelector('code').innerText; navigator.clipboard.writeText(code).then(() => { btn.classList.add('copied'); const originalHtml = btn.innerHTML; btn.innerHTML = '<i class="fa-regular fa-clipboard"></i> Copied!'; setTimeout(() => { btn.classList.remove('copied'); btn.innerHTML = originalHtml; }, 2000); }); };
+window.copyMessage = function(text) { navigator.clipboard.writeText(text).then(() => showToast('Message copied', 'success')).catch(() => showToast('Failed to copy', 'error')); };
 
-// Copy message to clipboard
-window.copyMessage = function(text) {
-    navigator.clipboard.writeText(text).then(() => {
-        showToast('Message copied', 'success');
-    }).catch(() => {
-        showToast('Failed to copy', 'error');
-    });
-};
-
-// Edit message - convert to editable textarea
 window.editMessage = function(btn) {
-    const msgDiv = btn.closest('.message');
-    const textEl = msgDiv.querySelector('.msg-text-content');
-    const originalText = textEl.textContent;
-
-    // Create textarea for editing
-    const textarea = document.createElement('textarea');
-    textarea.className = 'msg-edit-textarea';
-    textarea.value = originalText;
-    textarea.rows = 3;
-
-    // Replace text with textarea
-    textEl.replaceWith(textarea);
-    textarea.focus();
-
-    // Create action buttons for edit mode
+    const msgDiv = btn.closest('.message'); const textEl = msgDiv.querySelector('.msg-text-content'); const originalText = textEl.textContent;
+    const textarea = document.createElement('textarea'); textarea.className = 'msg-edit-textarea'; textarea.value = originalText; textarea.rows = 3;
+    textEl.replaceWith(textarea); textarea.focus();
     const actionsDiv = msgDiv.querySelector('.message-actions');
-    actionsDiv.innerHTML = `
-        <button class="msg-action-btn msg-edit-save" onclick="saveEditedMessage(this)" title="Send">
-            <i class="fa-solid fa-paper-plane"></i>
-        </button>
-        <button class="msg-action-btn msg-edit-cancel" onclick="cancelEditMessage(this)" title="Cancel">
-            <i class="fa-solid fa-xmark"></i>
-        </button>
-    `;
-
-    // Handle Enter/Shift+Enter
-    textarea.addEventListener('keydown', function(e) {
-        if (e.key === 'Enter' && !e.shiftKey) {
-            e.preventDefault();
-            saveEditedMessage(btn.closest('.message').querySelector('.msg-edit-save'));
-        }
-        if (e.key === 'Escape') {
-            cancelEditMessage(btn.closest('.message').querySelector('.msg-edit-cancel'));
-        }
-    });
+    actionsDiv.innerHTML = `<button class="msg-action-btn msg-edit-save" onclick="saveEditedMessage(this)" title="Send"><i class="fa-solid fa-paper-plane"></i></button>
+        <button class="msg-action-btn msg-edit-cancel" onclick="cancelEditMessage(this)" title="Cancel"><i class="fa-solid fa-xmark"></i></button>`;
+    textarea.addEventListener('keydown', function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEditedMessage(btn.closest('.message').querySelector('.msg-edit-save')); } if (e.key === 'Escape') cancelEditMessage(btn.closest('.message').querySelector('.msg-edit-cancel')); });
 };
 
-// Save edited message and resend
 window.saveEditedMessage = function(btn) {
-    const msgDiv = btn.closest('.message');
-    const textarea = msgDiv.querySelector('.msg-edit-textarea');
-    const newText = textarea.value.trim();
-
+    const msgDiv = btn.closest('.message'); const textarea = msgDiv.querySelector('.msg-edit-textarea'); const newText = textarea.value.trim();
     if (!newText) return;
-
-    // Find the index of this message in history
     const msgIndex = Array.from(messagesWrapper.children).indexOf(msgDiv);
-    if (msgIndex >= 0) {
-        // Remove the message and all subsequent messages
-        currentChatHistory.splice(msgIndex, currentChatHistory.length - msgIndex);
-        renderHistory();
-
-        // Resend the edited message
-        messageInput.value = newText;
-        handleSend();
-    }
+    if (msgIndex >= 0) { currentChatHistory.splice(msgIndex, currentChatHistory.length - msgIndex); renderHistory(); messageInput.value = newText; handleSend(); }
 };
 
-// Cancel edit and restore original
 window.cancelEditMessage = function(btn) {
-    const msgDiv = btn.closest('.message');
-    const textarea = msgDiv.querySelector('.msg-edit-textarea');
-    const originalText = textarea.value;
-
-    const textEl = document.createElement('div');
-    textEl.className = 'msg-text-content';
-    textEl.textContent = originalText;
-    textarea.replaceWith(textEl);
-
+    const msgDiv = btn.closest('.message'); const textarea = msgDiv.querySelector('.msg-edit-textarea'); const originalText = textarea.value;
+    const textEl = document.createElement('div'); textEl.className = 'msg-text-content'; textEl.textContent = originalText; textarea.replaceWith(textEl);
     const actionsDiv = msgDiv.querySelector('.message-actions');
-    actionsDiv.innerHTML = `
-        <button class="msg-action-btn" onclick="copyMessage('${originalText.replace(/'/g, '\\x27')}')" title="Copy">
-            <i class="fa-regular fa-copy"></i>
-        </button>
-        <button class="msg-action-btn" onclick="editMessage(this)" title="Edit">
-            <i class="fa-solid fa-pen"></i>
-        </button>
-    `;
+    actionsDiv.innerHTML = `<button class="msg-action-btn" onclick="copyMessage('${originalText.replace(/'/g, '\\x27')}')" title="Copy"><i class="fa-regular fa-copy"></i></button>
+        <button class="msg-action-btn" onclick="editMessage(this)" title="Edit"><i class="fa-solid fa-pen"></i></button>`;
 };
 
-window.sendSuggestion = function(text) {
-    messageInput.value = text;
-    updateSendButton();
-    handleSend();
-};
+window.sendSuggestion = function(text) { messageInput.value = text; updateSendButton(); handleSend(); };
 
-// === CODE BLOCK FORMATTING ===
 function formatCodeBlocks(container) {
     const blocks = container.querySelectorAll('pre code');
     blocks.forEach((block) => {
         const pre = block.parentElement;
-        
-        // STEP 1: Run Highlight.js syntax highlighting on the code block
-        // Skip if already highlighted (hljs adds the 'hljs' class after highlighting)
         if (!block.classList.contains('hljs')) {
-            // Extract language from class name (marked adds e.g., "language-javascript")
-            const langMatch = block.className.match(/language-(\w+)/);
-            const lang = langMatch ? langMatch[1] : '';
-            
-            if (lang && hljs.getLanguage(lang)) {
-                // Known language: highlight with it
-                try {
-                    block.setAttribute('data-highlighted', 'yes');
-                    hljs.highlightElement(block);
-                } catch (e) {
-                    // fallback silently
-                }
-            } else {
-                // No language or unknown: let hljs auto-detect
-                try {
-                    block.setAttribute('data-highlighted', 'yes');
-                    hljs.highlightElement(block);
-                } catch (e) {}
-            }
+            const langMatch = block.className.match(/language-(\w+)/); const lang = langMatch ? langMatch[1] : '';
+            if (lang && hljs.getLanguage(lang)) { try { block.setAttribute('data-highlighted', 'yes'); hljs.highlightElement(block); } catch (e) {} }
+            else { try { block.setAttribute('data-highlighted', 'yes'); hljs.highlightElement(block); } catch (e) {} }
         }
-        
-        // STEP 2: Wrap in code-block-wrapper with language header + copy button
         if (!pre.parentElement.classList.contains('code-block-wrapper')) {
-            // Get language name for the header badge
-            const classStr = block.className
-                .replace('hljs', '')
-                .replace('language-', '')
-                .replace(/\s+/g, '')
-                .trim();
+            const classStr = block.className.replace('hljs', '').replace('language-', '').replace(/\s+/g, '').trim();
             const lang = classStr || 'code';
-            
-            const wrapper = document.createElement('div');
-            wrapper.className = 'code-block-wrapper';
-            const header = document.createElement('div');
-            header.className = 'code-header';
+            const wrapper = document.createElement('div'); wrapper.className = 'code-block-wrapper';
+            const header = document.createElement('div'); header.className = 'code-header';
             header.innerHTML = `<span>${lang}</span><button class="copy-btn" onclick="copyCode(this)"><i class="fa-regular fa-clipboard"></i> Copy</button>`;
-            pre.parentNode.insertBefore(wrapper, pre);
-            wrapper.appendChild(header);
-            wrapper.appendChild(pre);
+            pre.parentNode.insertBefore(wrapper, pre); wrapper.appendChild(header); wrapper.appendChild(pre);
         }
     });
 }
 
-// === SERVICE WORKER (PWA) — AUTO-UPDATE SYSTEM ===
 if ('serviceWorker' in navigator) {
     window.addEventListener('load', () => {
-        // Track if this is the first install for the current session.
-        // If the controller is null, there was no active SW controlling the page.
         const isFirstInstall = navigator.serviceWorker.controller === null;
-
-        navigator.serviceWorker.register('/service-worker.js')
-            .then(reg => {
-                console.log('[SW] Registered with scope:', reg.scope);
-                
-                // Optional: Check for updates periodically (e.g., every hour)
-                setInterval(() => {
-                    reg.update();
-                }, 60 * 60 * 1000);
-            })
-            .catch(err => console.error('[SW] Registration failed:', err));
-
-        // When a new service worker takes over (calls clients.claim())
+        navigator.serviceWorker.register('/service-worker.js').then(reg => { console.log('[SW] Registered with scope:', reg.scope); setInterval(() => reg.update(), 60 * 60 * 1000); }).catch(err => console.error('[SW] Registration failed:', err));
         let refreshing = false;
-        navigator.serviceWorker.addEventListener('controllerchange', () => {
-            if (refreshing) return;
-            refreshing = true;
-            
-            // Only force reload if this is an update to an existing SW,
-            // not the very first time the user visits the site.
-            if (!isFirstInstall) {
-                console.log('[SW] New version activated. Reloading page for instant update...');
-                window.location.reload();
-            }
-        });
+        navigator.serviceWorker.addEventListener('controllerchange', () => { if (refreshing) return; refreshing = true; if (!isFirstInstall) { console.log('[SW] New version activated. Reloading page for instant update...'); window.location.reload(); } });
     });
 }
 
-// === BACKEND HEALTH CHECK ===
-// On every page load, verify the server is reachable. If not, show
-// a friendly banner with the actual port so the user knows where
-// the server should be running.
 (function checkBackendHealth() {
     const bannerId = 'oxy-backend-banner';
     function showBanner(message) {
         if (document.getElementById(bannerId)) return;
-        const banner = document.createElement('div');
-        banner.id = bannerId;
-        banner.style.cssText = `
-            position: fixed; top: 0; left: 0; right: 0; z-index: 99999;
-            background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
-            color: #fff; padding: 12px 20px; font-family: inherit;
-            font-size: 14px; text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,0.3);
-            display: flex; align-items: center; justify-content: center; gap: 12px;
-            flex-wrap: wrap;
-        `;
-        banner.innerHTML = `<strong>⚠️ ${message}</strong>`;
-        document.body && document.body.appendChild(banner);
+        const banner = document.createElement('div'); banner.id = bannerId;
+        banner.style.cssText = 'position: fixed; top: 0; left: 0; right: 0; z-index: 99999; background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%); color: #fff; padding: 12px 20px; font-family: inherit; font-size: 14px; text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,0.3); display: flex; align-items: center; justify-content: center; gap: 12px; flex-wrap: wrap;';
+        banner.innerHTML = `<strong>⚠️ ${message}</strong>`; document.body && document.body.appendChild(banner);
     }
-    fetch('/api/health', { cache: 'no-store' })
-        .then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
-        .then(data => { console.log('[Health] Backend OK on port', data.port, '— uptime', data.uptime.toFixed(0) + 's'); })
-        .catch(err => {
-            const port = window.location.port || (window.location.protocol === 'https:' ? 443 : 80);
-            const host = window.location.hostname || 'localhost';
-            showBanner(`Backend not reachable at http://${host}:${port}. Run \`npm start\` in the project folder. (${err.message})`);
-        });
+    fetch('/api/health', { cache: 'no-store' }).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); }).then(data => { console.log('[Health] Backend OK on port', data.port, '— uptime', data.uptime.toFixed(0) + 's'); }).catch(err => { const port = window.location.port || (window.location.protocol === 'https:' ? 443 : 80); const host = window.location.hostname || 'localhost'; showBanner(`Backend not reachable at http://${host}:${port}. Run \`npm start\` in the project folder. (${err.message})`); });
 })();
 
-// === INIT ===
 async function initApp() {
     console.log('[App] Initializing OXY AI...');
     const isAuthenticated = await checkAuth();
     if (!isAuthenticated) return;
-    
-    updateUserUI();
-    loadSessionsList();
-    initLocation();
+    updateUserUI(); loadSessionsList(); initLocation();
     if (!currentSessionId) createNewSession();
 }
 
-// Wait for DOM to be ready before running init
-if (document.readyState === 'complete' || document.readyState === 'interactive') {
-    initApp();
-} else {
-    document.addEventListener('DOMContentLoaded', initApp);
-}
-
+if (document.readyState === 'complete' || document.readyState === 'interactive') { initApp(); }
+else { document.addEventListener('DOMContentLoaded', initApp); }
