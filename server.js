@@ -15,10 +15,6 @@ import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import pool, { initDb } from './db.js';
 import bcrypt from 'bcrypt';
-import { createRequire } from 'module';
-
-const require = createRequire(import.meta.url);
-const pdfParse = require('pdf-parse');
 
 dotenv.config();
 
@@ -1847,44 +1843,6 @@ async function executeWithKeyManager(params, isStream = true) {
 // FILE PROCESSING HELPERS
 // ============================================================
 
-async function extractPdfText(buffer) {
-    try {
-        console.log('[PDF] Extracting text from PDF (size: ' + buffer.length + ' bytes)');
-        const data = await pdfParse(buffer);
-        const pageCount = data.numpages;
-        console.log(`[PDF] ✓ Successfully extracted text from ${pageCount} page(s)`);
-        
-        // Extract text with page markers
-        let fullText = '';
-        let pageNum = 1;
-        const pages = data.text.split(/\f/); // Split by form feed (page break)
-        
-        for (const pageText of pages) {
-            if (pageText.trim()) {
-                fullText += `\n--- Page ${pageNum} ---\n${pageText.trim()}\n`;
-                pageNum++;
-            }
-        }
-        
-        if (!fullText.trim()) {
-            console.log('[PDF] ⚠️  PDF has no extractable text content');
-            return '[PDF uploaded but contains no extractable text]';
-        }
-        
-        // Limit text to 50000 characters to avoid token overload
-        let extractedText = fullText.substring(0, 50000);
-        if (fullText.length > 50000) {
-            console.log(`[PDF] Text truncated from ${fullText.length} to 50000 characters`);
-            extractedText += '\n\n[Text truncated due to length...]';
-        }
-        
-        return extractedText;
-    } catch (err) {
-        console.error('[PDF] ❌ Error extracting PDF text:', err.message);
-        return `[Error extracting PDF text: ${err.message}]`;
-    }
-}
-
 async function extractDocxText(buffer) {
     try {
         const zip = await JSZip.loadAsync(buffer);
@@ -2376,22 +2334,9 @@ app.post('/api/chat', optionalUserAuth, upload.array('files', 10), async (req, r
                                     imageFiles.push({ inlineData: { mimeType: pf.type, data: buffer.toString('base64') } });
                                     fileDescriptions.push(`[Image: ${pf.name}]`);
                                 } else if (pf.type === 'application/pdf') {
-                                    console.log(`[Chat] ✓ Processing as PDF (type: ${pf.type})`);
-                                    try {
-                                        const extractedText = await extractPdfText(buffer);
-                                        // Only add to pdfContent if extraction was successful
-                                        if (!extractedText.includes('Error extracting') && !extractedText.includes('no extractable text')) {
-                                            pdfContent.push(`📄 PDF: "${pf.name}"\n${extractedText}`);
-                                            fileDescriptions.push(`[PDF: ${pf.name}]`);
-                                            console.log(`[Chat] ✓ PDF text extracted and merged into message`);
-                                        } else {
-                                            console.log(`[Chat] ⚠️  PDF extraction had issues, skipping content`);
-                                            fileDescriptions.push(`[PDF: ${pf.name}]`);
-                                        }
-                                    } catch (err) {
-                                        console.error('[Chat] ❌ Error extracting PDF:', err.message);
-                                        fileDescriptions.push(`[PDF: ${pf.name}]`);
-                                    }
+                                    console.log(`[Chat] ✓ Processing as PDF (type: ${pf.type}) - sending as inlineData directly to Gemini`);
+                                    imageFiles.push({ inlineData: { mimeType: pf.type, data: buffer.toString('base64') } });
+                                    fileDescriptions.push(`[PDF: ${pf.name}]`);
                                 } else {
                                     console.log(`[Chat] ✗ Not a visual file or PDF (type: ${pf.type}), treating as unsupported`);
                                     fileDescriptions.push(`[File: ${pf.name}]`);
