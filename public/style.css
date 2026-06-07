@@ -84,6 +84,11 @@ body {
     display: flex;
     height: 100vh;
     width: 100vw;
+    /* Ensure safe area is respected */
+    padding-top: max(0, env(safe-area-inset-top));
+    padding-left: max(0, env(safe-area-inset-left));
+    padding-right: max(0, env(safe-area-inset-right));
+    padding-bottom: max(0, env(safe-area-inset-bottom));
 }
 
 /* Sidebar Overlay (mobile/tablet only) */
@@ -407,11 +412,17 @@ body {
 .chat-container {
     flex: 1;
     overflow-y: auto;
-    padding: 40px 20px;
+    padding: 40px 20px 20px;
     display: flex;
     flex-direction: column;
     align-items: center;
     scroll-behavior: smooth;
+    /* Ensure messages don't hide behind input bar */
+    padding-bottom: calc(250px + 40px);
+    /* Use relative units for better scaling */
+    padding-left: clamp(12px, 5vw, 40px);
+    padding-right: clamp(12px, 5vw, 40px);
+    padding-top: clamp(20px, 4vh, 40px);
 }
 
 .welcome-screen {
@@ -486,10 +497,10 @@ body {
 
 .messages-wrapper {
     width: 100%;
-    max-width: 800px;
+    max-width: clamp(280px, 95vw, 900px);
     display: flex;
     flex-direction: column;
-    gap: 24px;
+    gap: clamp(12px, 3vh, 24px);
 }
 
 .message {
@@ -543,9 +554,23 @@ body {
 }
 
 .message-content {
-    max-width: 80%;
+    max-width: 85%;
     font-size: 15px;
     line-height: 1.6;
+    overflow-wrap: break-word;
+    word-break: break-word;
+}
+
+/* Images and videos must fit container */
+.message-content img,
+.message-content video,
+.msg-attach-img,
+.msg-attach-img-video {
+    max-width: 100%;
+    max-height: 100%;
+    height: auto;
+    display: block;
+    border-radius: 12px;
 }
 
 .message.user .message-content {
@@ -595,15 +620,23 @@ body {
 }
 
 .input-area {
-    padding: 0 20px 20px;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    padding: 16px;
     display: flex;
     flex-direction: column;
     align-items: center;
+    background: linear-gradient(to top, var(--bg-primary) 60%, transparent);
+    padding-bottom: max(16px, env(safe-area-inset-bottom));
+    z-index: 50;
+    max-width: 100%;
 }
 
 .input-wrapper {
     width: 100%;
-    max-width: 800px;
+    max-width: clamp(100%, 90vw, 800px);
     background-color: #2a2a2a;
     border: 1px solid #4a4a4a;
     border-radius: 24px;
@@ -612,6 +645,9 @@ body {
     padding: 8px 10px;
     box-shadow: 0 4px 24px rgba(0,0,0,0.35);
     transition: border-color 0.3s, opacity 0.3s;
+    /* Ensure it doesn't get cut off by safe area */
+    margin-left: auto;
+    margin-right: auto;
 }
 
 .input-wrapper:focus-within {
@@ -629,11 +665,19 @@ body {
     background: none;
     border: none;
     color: var(--text-secondary);
-    padding: 10px;
+    padding: 8px;
     cursor: pointer;
     border-radius: 50%;
     transition: all 0.2s;
-    font-size: 16px;
+    font-size: 18px;
+    width: clamp(40px, 10vw, 48px);
+    height: clamp(40px, 10vw, 48px);
+    min-width: 44px;
+    min-height: 44px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
 }
 
 .attach-btn:hover {
@@ -647,12 +691,13 @@ textarea {
     border: none;
     color: var(--text-primary);
     font-family: inherit;
-    font-size: 15px;
+    font-size: clamp(14px, 4vw, 15px);
     resize: none;
-    padding: 12px 10px;
+    padding: clamp(8px, 2vw, 12px) clamp(8px, 2vw, 10px);
     max-height: 150px;
     overflow-y: auto;
     outline: none;
+    min-width: 40px;
 }
 
 textarea::placeholder {
@@ -663,8 +708,10 @@ textarea::placeholder {
     background-color: var(--text-primary);
     color: var(--bg-primary);
     border: none;
-    width: 36px;
-    height: 36px;
+    width: clamp(36px, 10vw, 44px);
+    height: clamp(36px, 10vw, 44px);
+    min-width: 44px;
+    min-height: 44px;
     border-radius: 50%;
     display: flex;
     align-items: center;
@@ -673,6 +720,7 @@ textarea::placeholder {
     transition: all 0.2s;
     margin-bottom: 4px;
     margin-right: 4px;
+    flex-shrink: 0;
 }
 
 .send-btn:disabled {
@@ -801,132 +849,500 @@ textarea::placeholder {
     body {
         overflow: hidden;
     }
+    
     .app-container {
         width: 100vw;
         max-width: 100vw;
         overflow-x: hidden;
     }
+    
     .chat-main {
         width: 100%;
         min-width: 0;
     }
+    
     .chat-header {
-        height: 64px;
-        padding: 0 24px;
+        height: clamp(56px, 10vh, 72px);
+        padding: 0 clamp(16px, 3vw, 24px);
+        flex-shrink: 0;
     }
+    
     .header-actions {
         gap: 10px;
     }
+    
     .action-btn {
         width: 44px;
         height: 44px;
+        min-width: 44px;
+        min-height: 44px;
+        font-size: 18px;
         border-radius: 10px;
-        font-size: 17px;
         display: flex;
         align-items: center;
         justify-content: center;
+        flex-shrink: 0;
     }
+    
     .action-btn:hover {
         background-color: rgba(255, 255, 255, 0.06);
     }
+    
     .chat-container {
-        padding: 28px 24px;
+        padding: clamp(20px, 4vh, 28px) clamp(16px, 3vw, 24px);
+        padding-bottom: calc(min(300px, 50vh) + 2rem);
     }
+    
     .welcome-screen h2 {
-        font-size: 30px;
+        font-size: clamp(26px, 6vw, 32px);
     }
+    
     .welcome-screen p {
-        font-size: 15px;
-        margin-bottom: 32px;
+        font-size: clamp(14px, 3vw, 15px);
+        margin-bottom: clamp(24px, 4vh, 32px);
     }
+    
     .suggestion-cards {
-        grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-        gap: 14px;
+        grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+        gap: 12px;
     }
+    
     .suggestion-card {
-        padding: 18px;
+        padding: clamp(14px, 2vw, 18px);
+        border-radius: 14px;
     }
+    
+    .messages-wrapper {
+        max-width: clamp(300px, 90vw, 850px);
+    }
+    
+    .message-content {
+        max-width: 85%;
+        font-size: clamp(14px, 2.5vw, 15px);
+    }
+    
     .input-area {
-        padding: 0 24px 20px;
+        padding: clamp(12px, 2vh, 16px);
+        padding-bottom: max(clamp(12px, 2vh, 16px), env(safe-area-inset-bottom));
     }
+    
     .input-wrapper {
-        max-width: 760px;
+        max-width: clamp(400px, 90vw, 760px);
+        padding: 8px 10px;
     }
+    
+    .file-preview-strip {
+        max-width: 100%;
+        gap: 10px;
+    }
+    
+    .preview-item {
+        min-width: clamp(90px, 20vw, 100px);
+        max-width: clamp(90px, 20vw, 120px);
+    }
+    
     .attach-btn {
         width: 44px;
         height: 44px;
+        min-width: 44px;
+        min-height: 44px;
         font-size: 18px;
     }
+    
     .send-btn {
-        width: 42px;
-        height: 42px;
+        width: 40px;
+        height: 40px;
+        min-width: 40px;
+        min-height: 40px;
     }
+    
     textarea {
-        font-size: 15px;
-        padding: 12px 12px;
+        font-size: clamp(14px, 2.5vw, 15px);
+    }
+    
+    .msg-attach-img {
+        max-height: clamp(200px, 55vw, 350px);
     }
 }
 
 /* Small tablet — 7"/8" portrait (768–833px) */
 @media (min-width: 768px) and (max-width: 833px) {
-    .chat-header { padding: 0 16px; }
-    .chat-container { padding: 20px 16px; }
-    .input-area { padding: 0 16px 18px; }
+    .chat-header { 
+        padding: 0 clamp(12px, 2vw, 16px);
+        height: clamp(52px, 8vh, 64px);
+    }
+    
+    .chat-container { 
+        padding: clamp(16px, 3vh, 20px);
+        padding-bottom: calc(min(280px, 45vh) + 2rem);
+    }
+    
+    .input-area { 
+        padding: clamp(10px, 2vh, 14px);
+    }
+    
     .suggestion-cards {
         grid-template-columns: 1fr;
+    }
+    
+    .messages-wrapper {
+        max-width: clamp(280px, 92vw, 700px);
+    }
+    
+    .message-content {
+        max-width: 90%;
     }
 }
 
 /* Mid tablet — iPad Air / Pro 11" portrait (834–1023px) */
 @media (min-width: 834px) and (max-width: 1023px) {
-    .chat-container { padding: 28px 28px; }
-    .input-area { padding: 0 28px 20px; }
-    .chat-header { padding: 0 24px; }
+    .chat-container { 
+        padding: clamp(24px, 4vh, 32px);
+        padding-bottom: calc(min(320px, 50vh) + 2rem);
+    }
+    
+    .input-area { 
+        padding: clamp(14px, 2vh, 18px);
+    }
+    
+    .chat-header { 
+        padding: 0 clamp(20px, 3vw, 28px);
+    }
+    
+    .messages-wrapper {
+        max-width: clamp(350px, 85vw, 900px);
+    }
+    
+    .message-content {
+        max-width: 75%;
+    }
 }
 
-/* Narrower mobile / large phones (≤ 767px) */
-@media (max-width: 767px) {
+/* Desktop screens (> 1024px) - keep existing layout optimal */
+@media (min-width: 1024px) {
+    .app-container {
+        width: 100vw;
+    }
+    
+    .chat-main {
+        width: 100%;
+    }
+    
     .chat-header {
-        height: 56px;
-        padding: 0 12px;
+        height: 64px;
+        padding: 0 24px;
+        flex-shrink: 0;
     }
-    .sidebar-toggle-btn {
-        width: 44px;
-        height: 44px;
-        border-radius: 10px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-    }
-    .sidebar-toggle-btn:hover {
-        background-color: rgba(255, 255, 255, 0.06);
-    }
+    
     .header-actions {
-        gap: 4px;
+        gap: 10px;
     }
+    
     .action-btn {
         width: 44px;
         height: 44px;
-        font-size: 16px;
+        min-width: 44px;
+        min-height: 44px;
+        font-size: 18px;
         border-radius: 10px;
         display: flex;
         align-items: center;
         justify-content: center;
     }
+    
     .chat-container {
-        padding: 16px 12px;
+        padding: 40px 20px;
+        padding-bottom: calc(250px + 40px);
     }
-    .input-area {
-        padding: 0 12px 14px;
+    
+    .messages-wrapper {
+        max-width: 900px;
+        gap: 24px;
     }
-    .input-wrapper {
-        padding: 6px 8px;
-    }
-    textarea {
+    
+    .message-content {
+        max-width: 70%;
         font-size: 15px;
     }
+    
+    .message.bot .message-content {
+        width: 100%;
+    }
+    
+    .input-area {
+        padding: 16px 20px;
+        padding-bottom: max(16px, env(safe-area-inset-bottom));
+    }
+    
+    .input-wrapper {
+        max-width: 850px;
+    }
+    
+    .file-preview-strip {
+        max-width: 850px;
+        gap: 12px;
+    }
+    
+    .preview-item {
+        min-width: 100px;
+        max-width: 130px;
+    }
+    
+    .msg-attach-img {
+        max-height: 450px;
+    }
+    
+    .welcome-screen h2 {
+        font-size: 32px;
+    }
+    
+    .welcome-screen p {
+        font-size: 16px;
+        margin-bottom: 40px;
+    }
+    
+    .suggestion-cards {
+        grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+        gap: 15px;
+        max-width: 900px;
+    }
+}
+
+/* Large desktop (> 1440px) - optimize ultra-wide screens */
+@media (min-width: 1440px) {
+    .messages-wrapper {
+        max-width: 1000px;
+    }
+    
+    .input-wrapper {
+        max-width: 1000px;
+    }
+    
+    .message-content {
+        max-width: 65%;
+    }
+}
+
+/* Ultra-wide desktop (> 1920px) */
+@media (min-width: 1920px) {
+    .messages-wrapper {
+        max-width: 1100px;
+    }
+    
+    .input-wrapper {
+        max-width: 1100px;
+    }
+    
+    .message-content {
+        max-width: 60%;
+    }
+}
+
+
+@media (max-width: 767px) {
+    body {
+        overflow: hidden;
+    }
+    
+    .chat-header {
+        height: clamp(48px, 12vw, 56px);
+        padding: 0 clamp(8px, 2vw, 12px);
+        flex-shrink: 0;
+    }
+    
+    .sidebar-toggle-btn {
+        width: 44px;
+        height: 44px;
+        min-width: 44px;
+        min-height: 44px;
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+    }
+    
+    .sidebar-toggle-btn:hover {
+        background-color: rgba(255, 255, 255, 0.06);
+    }
+    
+    .header-actions {
+        gap: 4px;
+        flex-shrink: 0;
+    }
+    
+    .action-btn {
+        width: 44px;
+        height: 44px;
+        min-width: 44px;
+        min-height: 44px;
+        font-size: 18px;
+        border-radius: 10px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+    }
+    
+    .chat-container {
+        padding: clamp(12px, 3vh, 20px);
+        padding-bottom: calc(min(280px, 45vh) + 2rem);
+        overflow-y: auto;
+        overflow-x: hidden;
+    }
+    
+    .chat-main {
+        position: relative;
+    }
+    
+    .input-area {
+        bottom: 0;
+        left: 0;
+        right: 0;
+        width: 100%;
+        padding: clamp(10px, 2vh, 14px);
+        padding-bottom: max(clamp(10px, 2vh, 14px), env(safe-area-inset-bottom));
+        z-index: 50;
+    }
+    
+    .input-wrapper {
+        width: 100%;
+        max-width: 100%;
+        padding: 6px 8px;
+        border-radius: 18px;
+    }
+    
+    .file-preview-strip {
+        max-width: 100%;
+        gap: 8px;
+        padding: 8px 0;
+    }
+    
+    .preview-item {
+        min-width: clamp(70px, 18vw, 85px);
+        max-width: clamp(70px, 18vw, 85px);
+        padding: 6px;
+    }
+    
+    .preview-name {
+        font-size: 10px;
+    }
+    
+    .preview-size {
+        font-size: 9px;
+    }
+    
+    .disclaimer {
+        font-size: 11px;
+        margin-top: 8px;
+    }
+    
+    .welcome-screen h2 {
+        font-size: clamp(24px, 7vw, 32px);
+        margin-bottom: 8px;
+    }
+    
+    .welcome-screen p {
+        font-size: clamp(14px, 4vw, 16px);
+        margin-bottom: clamp(24px, 5vh, 32px);
+    }
+    
+    .welcome-icon {
+        font-size: clamp(36px, 10vw, 48px);
+        margin-bottom: clamp(12px, 3vh, 20px);
+    }
+    
     .suggestion-cards {
         grid-template-columns: 1fr;
+        gap: 10px;
+        width: 100%;
+        max-width: 100%;
+    }
+    
+    .suggestion-card {
+        padding: clamp(12px, 3vw, 16px);
+        border-radius: 12px;
+    }
+    
+    .suggestion-card i {
+        font-size: 18px;
+    }
+    
+    .suggestion-card span {
+        font-size: 13px;
+    }
+    
+    .messages-wrapper {
+        max-width: 100%;
+        width: 100%;
+        gap: clamp(12px, 2vh, 18px);
+    }
+    
+    .message {
+        gap: clamp(8px, 2vw, 12px);
+        width: 100%;
+        margin-bottom: clamp(12px, 2vh, 18px);
+    }
+    
+    .message-avatar {
+        width: 28px;
+        height: 28px;
+        flex-shrink: 0;
+    }
+    
+    .message-content {
+        max-width: 100%;
+        font-size: clamp(13px, 3.5vw, 15px);
+        padding: clamp(10px, 2vw, 12px) clamp(12px, 3vw, 18px);
+        border-radius: 16px;
+    }
+    
+    .message.user .message-content {
+        background-color: #3a3a3a;
+        border-radius: 14px 14px 4px 14px;
+    }
+    
+    .msg-attach-img {
+        max-height: clamp(150px, 50vw, 250px);
+        border-radius: 10px;
+    }
+    
+    .typing-indicator {
+        padding: 8px 12px;
+        gap: 4px;
+    }
+    
+    .typing-indicator span {
+        width: 6px;
+        height: 6px;
+    }
+    
+    .input-controls {
+        gap: 8px;
+        margin-bottom: 12px;
+    }
+    
+    .stop-btn, .regen-btn {
+        padding: 6px 12px;
+        font-size: 12px;
+        border-radius: 16px;
+        min-height: 36px;
+        min-width: 100px;
+    }
+    
+    .send-btn {
+        width: 36px;
+        height: 36px;
+        min-width: 36px;
+        min-height: 36px;
+    }
+    
+    .attach-btn {
+        width: 36px;
+        height: 36px;
+        min-width: 36px;
+        min-height: 36px;
+        font-size: 16px;
     }
 }
 
@@ -1328,7 +1744,7 @@ textarea::placeholder {
     margin: 15px 0;
 }
 
-/* Modal Styles */
+/* Modal Styles - Responsive */
 .modal-overlay {
     position: fixed;
     top: 0;
@@ -1341,6 +1757,7 @@ textarea::placeholder {
     align-items: center;
     justify-content: center;
     z-index: 1000;
+    padding: clamp(16px, 5vw, 40px);
 }
 
 .modal-content {
@@ -1348,9 +1765,11 @@ textarea::placeholder {
     border: 1px solid #4a4a4a;
     border-radius: 16px;
     width: 90%;
-    max-width: 400px;
+    max-width: clamp(300px, 90vw, 500px);
     box-shadow: 0 20px 40px rgba(0,0,0,0.4);
     animation: fadeIn 0.3s ease;
+    max-height: 90vh;
+    overflow-y: auto;
 }
 
 .modal-header {
@@ -1639,8 +2058,9 @@ textarea::placeholder {
     flex-direction: column;
     align-items: center;
     gap: 4px;
-    min-width: 100px;
-    max-width: 130px;
+    min-width: clamp(80px, 20vw, 100px);
+    max-width: clamp(80px, 20vw, 130px);
+    width: 100%;
     background: rgba(255, 255, 255, 0.04);
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 12px;
@@ -1649,6 +2069,7 @@ textarea::placeholder {
     flex-shrink: 0;
     animation: slideUp 0.25s ease;
     transition: opacity 0.3s, border-color 0.3s;
+    aspect-ratio: 1;
 }
 
 /* Upload progress shimmer effect */
@@ -1838,29 +2259,34 @@ textarea::placeholder {
     background: rgba(0, 0, 0, 0.7);
     backdrop-filter: blur(8px);
     -webkit-backdrop-filter: blur(8px);
+    padding: clamp(12px, 3vw, 20px);
 }
 
 .camera-modal-content {
     background: var(--bg-secondary);
     border: 1px solid var(--border-color);
     border-radius: 20px;
-    width: 90%;
-    max-width: 500px;
+    width: 100%;
+    max-width: clamp(300px, 90vw, 500px);
     overflow: hidden;
     box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
     animation: fadeIn 0.3s ease;
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
 }
 
 .camera-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 16px 20px;
+    padding: clamp(12px, 2vw, 16px) clamp(16px, 3vw, 20px);
     border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
 }
 
 .camera-header h3 {
-    font-size: 16px;
+    font-size: clamp(14px, 3vw, 16px);
     font-weight: 600;
     display: flex;
     align-items: center;
@@ -1871,9 +2297,14 @@ textarea::placeholder {
     background: none;
     border: none;
     color: var(--text-secondary);
-    font-size: 20px;
+    font-size: 18px;
     cursor: pointer;
-    padding: 4px;
+    padding: 6px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 32px;
+    min-height: 32px;
 }
 
 .camera-close-btn:hover {
@@ -1883,13 +2314,16 @@ textarea::placeholder {
 .camera-body {
     position: relative;
     background: #000;
-    min-height: 300px;
+    min-height: clamp(200px, 45vw, 400px);
+    max-height: clamp(200px, 50vh, 500px);
+    overflow: hidden;
+    flex: 1;
 }
 
 .camera-body video {
     width: 100%;
     display: block;
-    max-height: 60vh;
+    height: 100%;
     object-fit: cover;
 }
 
@@ -1897,9 +2331,10 @@ textarea::placeholder {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 30px;
-    padding: 16px 20px;
+    gap: clamp(20px, 5vw, 30px);
+    padding: clamp(12px, 2vh, 16px) clamp(16px, 3vw, 20px);
     border-top: 1px solid var(--border-color);
+    flex-shrink: 0;
 }
 
 .camera-flip-btn {
@@ -1926,11 +2361,14 @@ textarea::placeholder {
     border: none;
     cursor: pointer;
     padding: 0;
-    width: 64px;
-    height: 64px;
+    width: 56px;
+    height: 56px;
+    min-width: 44px;
+    min-height: 44px;
     display: flex;
     align-items: center;
     justify-content: center;
+    flex-shrink: 0;
 }
 
 .capture-ring {
@@ -1965,6 +2403,7 @@ textarea::placeholder {
     backdrop-filter: blur(10px);
     -webkit-backdrop-filter: blur(10px);
     animation: fadeIn 0.25s ease;
+    padding: clamp(12px, 3vw, 20px);
 }
 
 .recent-files-modal-content {
@@ -1973,48 +2412,49 @@ textarea::placeholder {
     -webkit-backdrop-filter: blur(20px) saturate(1.3);
     border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 20px;
-    width: 90%;
-    max-width: 420px;
+    width: 100%;
+    max-width: clamp(300px, 90vw, 500px);
     overflow: hidden;
     box-shadow:
         0 20px 60px rgba(0, 0, 0, 0.5),
         0 0 0 1px rgba(255, 255, 255, 0.04) inset;
     animation: modalSlideUp 0.35s cubic-bezier(0.16, 1, 0.3, 1);
-}
-
-@keyframes modalSlideUp {
-    from { opacity: 0; transform: translateY(20px) scale(0.97); }
-    to { opacity: 1; transform: translateY(0) scale(1); }
+    max-height: 90vh;
+    display: flex;
+    flex-direction: column;
 }
 
 .recent-files-header {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 18px 22px;
+    padding: clamp(14px, 2vw, 18px) clamp(18px, 3vw, 22px);
     border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    flex-shrink: 0;
 }
 
 .recent-files-header h3 {
-    font-size: 16px;
+    font-size: clamp(14px, 3vw, 16px);
     font-weight: 600;
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     color: var(--text-primary);
 }
 
 .recent-files-header h3 i {
     color: var(--accent-color);
-    font-size: 15px;
+    font-size: 14px;
 }
 
 .recent-files-close-btn {
     background: rgba(255, 255, 255, 0.06);
     border: none;
     color: var(--text-secondary);
-    width: 30px;
-    height: 30px;
+    width: 32px;
+    height: 32px;
+    min-width: 32px;
+    min-height: 32px;
     border-radius: 8px;
     cursor: pointer;
     font-size: 16px;
@@ -2022,6 +2462,7 @@ textarea::placeholder {
     align-items: center;
     justify-content: center;
     transition: all 0.15s;
+    flex-shrink: 0;
 }
 
 .recent-files-close-btn:hover {
@@ -2030,10 +2471,11 @@ textarea::placeholder {
 }
 
 .recent-files-body {
-    max-height: 350px;
+    max-height: clamp(150px, 50vh, 400px);
     overflow-y: auto;
     padding: 8px 10px;
     scrollbar-width: thin;
+    flex: 1;
 }
 
 .recent-files-body::-webkit-scrollbar {
@@ -2111,21 +2553,23 @@ textarea::placeholder {
 }
 
 .recent-files-footer {
-    padding: 14px 22px;
+    padding: clamp(12px, 2vh, 14px) clamp(18px, 3vw, 22px);
     border-top: 1px solid rgba(255, 255, 255, 0.06);
+    flex-shrink: 0;
 }
 
 .recent-files-hint {
-    font-size: 12px;
+    font-size: clamp(11px, 2vw, 12px);
     color: var(--text-secondary);
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 6px;
 }
 
 .recent-files-hint i {
     color: rgba(99, 102, 241, 0.7);
-    font-size: 13px;
+    font-size: 12px;
+    flex-shrink: 0;
 }
 
 /* ==============================================
@@ -2267,14 +2711,17 @@ textarea::placeholder {
 /* Image - inline preview with rounded corners, max-width */
 .msg-attach-img {
     max-width: 100%;
-    max-height: 400px;
+    max-height: clamp(200px, 60vw, 400px);
+    height: auto;
     border-radius: 14px;
     cursor: pointer;
     display: block;
     transition: transform 0.2s, box-shadow 0.2s;
     box-shadow: 0 2px 12px rgba(0,0,0,0.3);
     width: 100%;
-    object-fit: cover;
+    object-fit: contain;
+    /* Prevent overflow */
+    contain: layout style paint;
 }
 
 .msg-attach-img:hover {
@@ -3907,4 +4354,273 @@ html, body {
 
 .app-container {
     overflow-x: hidden;
+}
+/* =====================================================
+   COMPREHENSIVE RESPONSIVE CSS FIXES
+   Added to ensure full responsiveness across all devices
+   ===================================================== */
+
+/* Ensure body never scrolls and layout is flexible */
+body {
+    height: 100vh;
+    width: 100vw;
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+}
+
+/* Sidebar and main area responsive */
+@media (max-width: 1023px) {
+    .sidebar {
+        height: 100vh;
+        max-height: 100vh;
+    }
+}
+
+/* All message bubbles responsive */
+.message {
+    width: 100%;
+    max-width: 100%;
+}
+
+.message-content {
+    overflow-wrap: break-word;
+    word-break: break-word;
+}
+
+/* Ensure all images and videos never overflow */
+.message-content img,
+.message-content video,
+.msg-attach-img,
+.msg-attachment-video {
+    max-width: 100%;
+    max-height: 100%;
+    height: auto !important;
+    width: auto !important;
+    object-fit: contain;
+    display: block;
+    margin: 0 auto;
+}
+
+/* Attachment grid responsive */
+.msg-attachments-grid {
+    width: 100%;
+    max-width: 100%;
+}
+
+.msg-attachments-grid > * {
+    max-width: 100%;
+    overflow: hidden;
+}
+
+/* File preview strip never exceeds container */
+.file-preview-strip {
+    max-width: 100%;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Input area always stays within bounds */
+.input-area {
+    width: 100%;
+    max-width: 100%;
+    left: 0;
+    right: 0;
+}
+
+.input-wrapper {
+    box-sizing: border-box;
+    width: 100%;
+}
+
+/* Responsive font sizing for various screens */
+@media (max-width: 360px) {
+    .message-content {
+        font-size: clamp(12px, 3vw, 14px);
+    }
+    
+    .welcome-screen h2 {
+        font-size: clamp(20px, 6vw, 26px);
+    }
+    
+    .welcome-screen p {
+        font-size: clamp(12px, 3.5vw, 14px);
+    }
+}
+
+@media (min-width: 361px) and (max-width: 480px) {
+    .message-content {
+        font-size: clamp(13px, 3.5vw, 15px);
+    }
+    
+    .welcome-screen h2 {
+        font-size: clamp(22px, 6.5vw, 28px);
+    }
+    
+    .welcome-screen p {
+        font-size: clamp(13px, 3.8vw, 15px);
+    }
+}
+
+@media (min-width: 481px) and (max-width: 768px) {
+    .message-content {
+        font-size: clamp(14px, 3vw, 15px);
+    }
+    
+    .welcome-screen h2 {
+        font-size: clamp(26px, 5.5vw, 32px);
+    }
+    
+    .welcome-screen p {
+        font-size: clamp(14px, 3vw, 15px);
+    }
+}
+
+@media (min-width: 769px) {
+    .message-content {
+        font-size: 15px;
+    }
+    
+    .welcome-screen h2 {
+        font-size: 32px;
+    }
+    
+    .welcome-screen p {
+        font-size: 15px;
+    }
+}
+
+/* Ensure modal dialogs don't overflow on small screens */
+.modal-overlay,
+.camera-modal,
+.recent-files-modal,
+.lightbox-modal {
+    width: 100vw;
+    height: 100vh;
+}
+
+/* Fix for notched phones and devices with safe areas */
+@supports (padding: max(0px)) {
+    .app-container {
+        padding-left: max(0, env(safe-area-inset-left));
+        padding-right: max(0, env(safe-area-inset-right));
+    }
+    
+    .input-area {
+        padding-bottom: max(12px, env(safe-area-inset-bottom));
+    }
+    
+    .chat-header {
+        padding-top: max(0, env(safe-area-inset-top));
+    }
+}
+
+/* Touch-friendly minimum sizes */
+button,
+a[role="button"],
+.action-btn,
+.send-btn,
+.attach-btn,
+.camera-flip-btn,
+.camera-capture-btn,
+.recent-files-close-btn,
+.lightbox-close {
+    min-height: 44px;
+    min-width: 44px;
+}
+
+/* Responsive drop zone */
+.drop-zone-content {
+    padding: clamp(20px, 5vw, 40px);
+    border-radius: clamp(16px, 5vw, 24px);
+}
+
+.drop-zone-icon {
+    font-size: clamp(32px, 8vw, 48px);
+}
+
+.drop-zone-content h3 {
+    font-size: clamp(16px, 4vw, 22px);
+}
+
+.drop-zone-content p {
+    font-size: clamp(12px, 3vw, 14px);
+}
+
+/* Code block responsive */
+.code-block-wrapper {
+    margin: clamp(8px, 2vw, 16px) 0;
+}
+
+.code-header {
+    padding: clamp(8px, 1.5vw, 10px) clamp(12px, 3vw, 16px);
+    font-size: clamp(10px, 2vw, 12px);
+}
+
+.message-content pre {
+    padding: clamp(12px, 2vw, 18px) clamp(12px, 3vw, 20px) !important;
+    font-size: clamp(11px, 2vw, 13.5px) !important;
+}
+
+.message-content pre code {
+    font-size: clamp(11px, 2vw, 13.5px) !important;
+}
+
+/* Tooltip and widget responsive */
+.oxy-widget {
+    padding: clamp(12px, 3vw, 20px);
+    margin: clamp(8px, 2vw, 12px) 0;
+    border-radius: clamp(12px, 3vw, 16px);
+}
+
+/* Ensure scrollable areas have proper touch behavior */
+.chat-container,
+.recent-files-body,
+.file-preview-strip,
+.message-content pre {
+    -webkit-overflow-scrolling: touch;
+}
+
+/* Prevent zoom on input focus for mobile */
+textarea,
+input {
+    font-size: 16px !important; /* Prevents zoom on iOS */
+}
+
+@media (min-width: 768px) {
+    textarea,
+    input {
+        font-size: 15px !important;
+    }
+}
+
+/* Final responsive check for text readability */
+@media (max-width: 375px) {
+    .suggestion-card span {
+        font-size: clamp(11px, 3vw, 13px);
+    }
+}
+
+/* Ensure chat has proper spacing from bottom */
+.chat-container {
+    padding-bottom: clamp(200px, 40vh, 350px);
+}
+
+/* Responsive attachment display */
+.msg-attachments-grid {
+    gap: clamp(4px, 1vw, 8px);
+}
+
+.msg-attach-file-card {
+    gap: clamp(10px, 2vw, 14px);
+    padding: clamp(10px, 2vw, 14px) clamp(12px, 2.5vw, 16px);
+}
+
+.msg-attach-file-card .file-card-name {
+    font-size: clamp(12px, 2.5vw, 14px);
+}
+
+.msg-attach-file-card .file-card-meta {
+    font-size: clamp(10px, 2vw, 12px);
 }
