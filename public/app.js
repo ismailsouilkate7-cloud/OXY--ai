@@ -335,12 +335,22 @@ async function uploadFiles(files) {
 }
 
 function addFilesToPending(fileList) {
-    const maxSize = 50 * 1024 * 1024;
+    const maxSize = 20 * 1024 * 1024; // 20MB limit
     const maxTotal = 10;
+    const allowedExtensions = ['.pdf', '.jpg', '.jpeg', '.png', '.gif', '.webp', '.mp4', '.mov', '.webm'];
     const errors = [];
     for (const file of fileList) {
+        const ext = '.' + file.name.split('.').pop().toLowerCase();
+        if (!allowedExtensions.includes(ext)) {
+            errors.push(`"${file.name}" is not supported. Please use PDF, images, or video.`);
+            continue;
+        }
         if (pendingFiles.length >= maxTotal) { errors.push(`Maximum ${maxTotal} files allowed`); break; }
-        if (file.size > maxSize) { errors.push(`"${file.name}" is too large (max 50MB)`); continue; }
+        if (file.size > maxSize) { 
+            const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
+            errors.push(`"${file.name}" is too large (${sizeMB}MB, max 20MB)`); 
+            continue; 
+        }
         if (file.size === 0) { errors.push(`"${file.name}" is empty`); continue; }
         const id = ++fileIdCounter;
         const preview = generatePreview(file);
@@ -353,6 +363,7 @@ function addFilesToPending(fileList) {
 
 function generatePreview(file) {
     if (file.type.startsWith('image/')) return URL.createObjectURL(file);
+    if (file.type.startsWith('video/')) return URL.createObjectURL(file);
     return null;
 }
 
@@ -407,7 +418,18 @@ function updateFilePreviewStrip() {
         const icon = getFileIcon(f.type, f.name);
         const color = getFileColor(f.type, f.name);
         const size = formatFileSize(f.size);
-        const thumbHtml = f.preview ? `<img src="${f.preview}" class="preview-thumb" alt="" loading="lazy">` : `<div class="preview-icon-bg" style="background:${color}20;color:${color}"><i class="fa-solid ${icon}"></i></div>`;
+        let thumbHtml;
+        if (f.preview) {
+            if (f.type.startsWith('image/')) {
+                thumbHtml = `<img src="${f.preview}" class="preview-thumb" alt="" loading="lazy">`;
+            } else if (f.type.startsWith('video/')) {
+                thumbHtml = `<video src="${f.preview}" class="preview-thumb"></video><div class="video-preview-overlay"><i class="fa-solid fa-play"></i></div>`;
+            } else {
+                thumbHtml = `<div class="preview-icon-bg" style="background:${color}20;color:${color}"><i class="fa-solid ${icon}"></i></div>`;
+            }
+        } else {
+            thumbHtml = `<div class="preview-icon-bg" style="background:${color}20;color:${color}"><i class="fa-solid ${icon}"></i></div>`;
+        }
         return `<div class="preview-item" data-id="${f.id}">
             <button class="preview-remove" onclick="removePendingFile(${f.id})"><i class="fa-solid fa-xmark"></i></button>
             <div class="preview-thumb-wrap">${thumbHtml}</div>
@@ -567,6 +589,14 @@ function buildFileAttachments(files) {
             attachEl.style.cursor = 'pointer';
             const imgIndex = imageFiles.indexOf(f);
             attachEl.addEventListener('click', (e) => { e.stopPropagation(); openLightbox(imageFiles, Math.max(0, imgIndex)); });
+        } else if (f.type?.startsWith('video/') && (f.url || f.preview)) {
+            attachEl = document.createElement('div');
+            attachEl.className = 'msg-attach-video-wrap';
+            const video = document.createElement('video');
+            video.className = 'msg-attach-video';
+            video.src = f.url || f.preview;
+            video.controls = true;
+            attachEl.appendChild(video);
         } else {
             attachEl = document.createElement('div');
             attachEl.className = 'msg-attach-file-card';
@@ -649,64 +679,99 @@ function renderHistory() {
     chatContainer.scrollTop = chatContainer.scrollHeight;
 }
 
+// Convert file to base64 string
+async function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result.split(',')[1]);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+    });
+}
+
+// Get MIME type for a file
+function getMimeType(file) {
+    const mimeMap = {
+        'pdf': 'application/pdf',
+        'jpg': 'image/jpeg', 'jpeg': 'image/jpeg',
+        'png': 'image/png',
+        'gif': 'image/gif',
+        'webp': 'image/webp',
+        'mp4': 'video/mp4',
+        'mov': 'video/quicktime',
+        'webm': 'video/webm'
+    };
+    if (file.type) return file.type;
+    const ext = file.name.split('.').pop().toLowerCase();
+    return mimeMap[ext] || 'application/octet-stream';
+}
+
+// Convert pending files to inline data for Gemini API
+async function convertFilesToInlineData(files) {
+    const inlineDataArray = [];
+    const fileInfoArray = [];
+    
+    for (const fileItem of files) {
+        const file = fileItem.file;
+        const mimeType = getMimeType(file);
+        
+        // Only support images, PDFs, and videos for inline data
+        const supportedTypes = ['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'application/pdf', 'video/mp4', 'video/quicktime', 'video/webm'];
+        if (!supportedTypes.includes(mimeType)) {
+            console.warn('[File] Skipping unsupported file type:', mimeType, file.name);
+            continue;
+        }
+        
+        try {
+            const base64Data = await fileToBase64(file);
+            inlineDataArray.push({
+                mimeType: mimeType,
+                data: base64Data
+            });
+            fileInfoArray.push({
+                name: file.name,
+                type: mimeType,
+                size: file.size,
+                preview: fileItem.preview
+            });
+        } catch (err) {
+            console.error('[File] Failed to convert to base64:', file.name, err);
+        }
+    }
+    
+    return { inlineDataArray, fileInfoArray };
+}
+
 async function preprocessAndSend(text, files) {
     isProcessingFiles = true;
     setUploadingState(true);
     updateSendButton();
-    const botMsgDiv = appendMessage('', 'bot', false);
-    const contentDiv = botMsgDiv.querySelector('.message-content');
-    const fileItems = files.map(f => `<div class="file-progress-item" style="padding:10px 0; border-bottom:1px solid #2a2a3a;">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;">
-            <div class="upload-spinner"></div>
-            <div style="flex:1;min-width:0;color:#e8e8ed;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${f.name}</div>
-            <div class="file-progress-pct" style="color:#a855f7;font-size:12px;font-weight:600;">0%</div>
-        </div>
-        <div class="upload-progress-bar"><div class="upload-progress-fill" style="width: 0%"></div></div>
-        <div class="file-progress-status" style="color:#8a8a9a;font-size:11px;margin-top:4px;">Processing...</div>
-    </div>`).join('');
-    contentDiv.innerHTML = '<div style="padding:12px;"><div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;"><div class="typing-indicator" style="display:inline-flex;"><span></span><span></span><span></span></div><span style="color:#8a8a9a;font-size:14px;">Processing files...</span></div><div class="file-progress-list">' + fileItems + '</div></div>';
-    if (!document.getElementById('oxy-upload-style')) { const style = document.createElement('style'); style.id = 'oxy-upload-style'; style.textContent = '@keyframes spin { to { transform: rotate(360deg); } }'; document.head.appendChild(style); }
-    function updateFileProgress(name, status, progress, isError, errorMsg) {
-        const items = contentDiv.querySelectorAll('.file-progress-item'); let item = null;
-        for (const el of items) { if (el.textContent.includes(name)) { item = el; break; } }
-        if (!item) return;
-        const spinner = item.querySelector('.upload-spinner'); const progressBar = item.querySelector('.upload-progress-fill'); const statusEl = item.querySelector('.file-progress-status'); const pctEl = item.querySelector('.file-progress-pct');
-        if (isError) { if (spinner) spinner.style.display = 'none'; if (progressBar) progressBar.style.background = '#ef4444'; if (statusEl) statusEl.textContent = errorMsg ? 'Error: ' + errorMsg : 'Failed'; if (pctEl) pctEl.textContent = 'Error'; }
-        else { if (progressBar) progressBar.style.width = (progress || 0) + '%'; if (pctEl) pctEl.textContent = (progress || 0) + '%'; if (status === 'ready' || progress >= 100) { if (spinner) spinner.style.display = 'none'; if (statusEl) statusEl.textContent = 'Ready'; if (pctEl) pctEl.textContent = '100%'; } else { if (statusEl) statusEl.textContent = (status === 'uploading' ? 'Uploading...' : 'Processing...') + ' ' + (progress || 0) + '%'; } }
-    }
+    
     try {
-        const formData = new FormData();
-        for (const f of files) { formData.append('files', f.file, f.name); }
-        const response = await fetch('/api/preprocess-files', { method: 'POST', body: formData });
-        if (!response.ok) throw new Error('Preprocessing failed (HTTP ' + response.status + ')');
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder('utf-8');
-        let buf = ''; const processedData = [];
-        while (true) {
-            const { value, done } = await reader.read();
-            if (done) break;
-            buf += decoder.decode(value, { stream: true });
-            const lines = buf.split('\n'); buf = lines.pop();
-            for (const line of lines) {
-                if (!line.trim() || !line.startsWith('data: ')) continue;
-                try { const data = JSON.parse(line.substring(6)); if (data.done) break; if (data.name) { if (data.status === 'saved') updateFileProgress(data.name, 'saved', 0); else if (data.status === 'uploading') updateFileProgress(data.name, 'uploading', data.progress || 0); else if (data.status === 'processing') updateFileProgress(data.name, 'processing', data.progress || 0); else if (data.status === 'ready') { updateFileProgress(data.name, 'ready', 100); processedData.push(data); } else if (data.status === 'failed') { updateFileProgress(data.name, 'failed', 0, true, data.error || 'Processing failed'); } } } catch (e) {}
-            }
+        // Convert files to base64 inline data
+        const { inlineDataArray, fileInfoArray } = await convertFilesToInlineData(files);
+        
+        if (fileInfoArray.length === 0) {
+            throw new Error('No supported files to process');
         }
-        const readyFiles = processedData.filter(d => d.status === 'ready');
-        if (readyFiles.length === 0) throw new Error('All files failed to process');
-        if (contentDiv) contentDiv.innerHTML = '<div style="padding:10px;color:#8a8a9a;font-size:13px;"><span style="color:#22c55e;">V</span> ' + readyFiles.length + ' file(s) ready' + (processedData.length > readyFiles.length ? ' (' + (processedData.length - readyFiles.length) + ' failed)' : '') + '</div>';
-        setUploadingState(false); isProcessingFiles = false;
-        if (botMsgDiv && botMsgDiv.parentNode) botMsgDiv.parentNode.removeChild(botMsgDiv);
+        
+        // Show ready message
+        setUploadingState(false);
+        isProcessingFiles = false;
         clearPendingFiles();
-        await sendMessage(text, [], false, processedData);
+        
+        // Send message with inline data
+        await sendMessage(text, inlineDataArray, false, fileInfoArray);
     } catch (error) {
         console.error('[Preprocess] Error:', error);
-        if (contentDiv) contentDiv.innerHTML = '<span style="color:#ef4444;padding:12px;">X File processing error: ' + error.message + '</span>';
-        setUploadingState(false); isProcessingFiles = false; updateSendButton();
+        showToast('File processing error: ' + error.message, 'error');
+        setUploadingState(false);
+        isProcessingFiles = false;
+        updateSendButton();
     }
 }
 
-async function sendMessage(text, files, isRegenerate = false, processedFiles = null) {
+async function sendMessage(text, inlineDataOrFiles = [], isRegenerate = false, processedFiles = null) {
     isGenerating = true;
     regenBtn.style.display = 'none'; stopBtn.style.display = 'flex';
     if (welcomeScreen.style.display !== 'none') welcomeScreen.style.display = 'none';
@@ -716,24 +781,106 @@ async function sendMessage(text, files, isRegenerate = false, processedFiles = n
     contentDiv.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
     abortController = new AbortController();
     let fullResponse = '';
-    const hasFiles = (files && files.length > 0) || (processedFiles && processedFiles.length > 0);
+    
+    // Determine if we have files (inlineData array from preprocessAndSend or file objects from handleSend)
+    const hasInlineData = Array.isArray(inlineDataOrFiles) && inlineDataOrFiles.length > 0 && inlineDataOrFiles[0].mimeType && inlineDataOrFiles[0].data;
+    const hasFileObjects = Array.isArray(inlineDataOrFiles) && inlineDataOrFiles.length > 0 && inlineDataOrFiles[0].file;
+    const hasFiles = hasInlineData || hasFileObjects || (processedFiles && processedFiles.length > 0);
+    
     if (hasFiles) setUploadingState(true);
     try {
         let response;
-        if (hasFiles) {
+        
+        if (hasInlineData) {
+            // Send with inline data (base64 encoded files)
+            const requestBody = {
+                message: text || '',
+                sessionId: currentSessionId,
+                userName: userName,
+                userGender: userGender,
+                userLocation: userLocation || '',
+                model: 'gemini-2.5-flash',
+                temperature: 0.7,
+                inlineData: inlineDataOrFiles
+            };
+            
+            console.log('[Chat] Sending message with inline data:', inlineDataOrFiles.length, 'files');
+            // Log detailed info about each inline data item
+            inlineDataOrFiles.forEach((item, idx) => {
+                console.log(`  [${idx}] mimeType: ${item.mimeType}, dataSize: ${item.data.length} bytes, isBase64Valid: ${/^[A-Za-z0-9+/=]*$/.test(item.data)}`);
+            });
+            response = await fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(requestBody),
+                signal: abortController.signal
+            });
+        } else if (hasFileObjects) {
+            // Send with FormData (old method with file preprocessing)
             const formData = new FormData();
-            formData.append('message', text || ''); formData.append('sessionId', currentSessionId); formData.append('userName', userName);
-            formData.append('userGender', userGender); formData.append('userLocation', userLocation || ''); formData.append('model', 'gemini-2.5-flash'); formData.append('temperature', '0.7');
-            if (processedFiles && processedFiles.length > 0) { formData.append('processedFiles', JSON.stringify(processedFiles)); }
-            else { for (const f of files) formData.append('files', f.file, f.name); }
-            response = await fetch('/api/chat', { method: 'POST', body: formData, signal: abortController.signal });
+            formData.append('message', text || '');
+            formData.append('sessionId', currentSessionId);
+            formData.append('userName', userName);
+            formData.append('userGender', userGender);
+            formData.append('userLocation', userLocation || '');
+            formData.append('model', 'gemini-2.5-flash');
+            formData.append('temperature', '0.7');
+            
+            for (const f of inlineDataOrFiles) {
+                formData.append('files', f.file, f.name);
+            }
+            
+            response = await fetch('/api/chat', {
+                method: 'POST',
+                body: formData,
+                signal: abortController.signal
+            });
+        } else if (processedFiles && processedFiles.length > 0) {
+            // Send with processed files (for backward compatibility)
+            const formData = new FormData();
+            formData.append('message', text || '');
+            formData.append('sessionId', currentSessionId);
+            formData.append('userName', userName);
+            formData.append('userGender', userGender);
+            formData.append('userLocation', userLocation || '');
+            formData.append('model', 'gemini-2.5-flash');
+            formData.append('temperature', '0.7');
+            formData.append('processedFiles', JSON.stringify(processedFiles));
+            
+            response = await fetch('/api/chat', {
+                method: 'POST',
+                body: formData,
+                signal: abortController.signal
+            });
         } else {
-            response = await fetch('/api/chat', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: text, sessionId: currentSessionId, userName, userGender, userLocation: userLocation || '', model: 'gemini-2.5-flash', temperature: 0.7 }), signal: abortController.signal });
+            // Send text-only message
+            response = await fetch('/api/chat', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message: text,
+                    sessionId: currentSessionId,
+                    userName,
+                    userGender,
+                    userLocation: userLocation || '',
+                    model: 'gemini-2.5-flash',
+                    temperature: 0.7
+                }),
+                signal: abortController.signal
+            });
         }
+        
         if (hasFiles) setUploadingState(false);
         if (!response.ok) {
             let errorMsg = 'Failed to get response';
-            try { const errData = await response.json(); errorMsg = errData.error || errorMsg; } catch(e) {}
+            console.error('[Chat] ❌ HTTP Error:', response.status, response.statusText);
+            try { 
+                const errData = await response.json(); 
+                console.error('[Chat] Error response:', errData);
+                errorMsg = errData.error || errorMsg; 
+            } catch(e) {
+                console.error('[Chat] Could not parse error response:', e.message);
+            }
             contentDiv.innerHTML = `<span style="color: #ef4444;">❌ Error: ${errorMsg}</span>`;
             fullResponse = errorMsg;
         } else {

@@ -15,6 +15,10 @@ import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
 import pool, { initDb } from './db.js';
 import bcrypt from 'bcrypt';
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
+const pdfParse = require('pdf-parse');
 
 dotenv.config();
 
@@ -1770,7 +1774,13 @@ async function executeWithRetry(params, isStream = true, opts = {}) {
                     for (let i = 0; i < lastMsg.parts.length; i++) {
                         const part = lastMsg.parts[i];
                         if (part.inlineData) {
-                            console.log(`    [${i}] inlineData: mimeType=${part.inlineData.mimeType}, dataSize=${part.inlineData.data.length} bytes`);
+                            if (typeof part.inlineData !== 'object' || !part.inlineData.mimeType || !part.inlineData.data) {
+                                console.error(`    [${i}] ❌ INVALID inlineData structure:`, JSON.stringify(part.inlineData, null, 2).substring(0, 200));
+                            } else if (typeof part.inlineData.data !== 'string') {
+                                console.error(`    [${i}] ❌ inlineData.data is not a string, type:`, typeof part.inlineData.data);
+                            } else {
+                                console.log(`    [${i}] ✓ inlineData: mimeType=${part.inlineData.mimeType}, dataSize=${part.inlineData.data.length} bytes`);
+                            }
                         } else if (part.text) {
                             console.log(`    [${i}] text: ${part.text.substring(0, 80)}...`);
                         } else if (part.fileData) {
@@ -1807,7 +1817,16 @@ async function executeWithRetry(params, isStream = true, opts = {}) {
                 await new Promise(r => setTimeout(r, backoffMs));
                 continue;
             }
-            // Non-retryable error
+            // Non-retryable error — log detailed error info
+            console.error(`[AI] ❌ Non-retryable error on Key[${keyIndex + 1}] (HTTP ${err.status || '?'})`);
+            console.error(`  Message: ${err.message}`);
+            console.error(`  Status: ${err.status}`);
+            if (err.response?.data?.error) {
+                console.error(`  API Error: ${JSON.stringify(err.response.data.error, null, 2)}`);
+            }
+            if (err.error) {
+                console.error(`  Error Details: ${JSON.stringify(err.error, null, 2)}`);
+            }
             keyManager.reportError(keyIndex, err);
             throw err;
         }
@@ -1829,8 +1848,41 @@ async function executeWithKeyManager(params, isStream = true) {
 // ============================================================
 
 async function extractPdfText(buffer) {
-    console.log('[PDF] PDF uploaded — text extraction delegated to browser');
-    return '[PDF uploaded — text will be extracted client-side when viewed]';
+    try {
+        console.log('[PDF] Extracting text from PDF (size: ' + buffer.length + ' bytes)');
+        const data = await pdfParse(buffer);
+        const pageCount = data.numpages;
+        console.log(`[PDF] ✓ Successfully extracted text from ${pageCount} page(s)`);
+        
+        // Extract text with page markers
+        let fullText = '';
+        let pageNum = 1;
+        const pages = data.text.split(/\f/); // Split by form feed (page break)
+        
+        for (const pageText of pages) {
+            if (pageText.trim()) {
+                fullText += `\n--- Page ${pageNum} ---\n${pageText.trim()}\n`;
+                pageNum++;
+            }
+        }
+        
+        if (!fullText.trim()) {
+            console.log('[PDF] ⚠️  PDF has no extractable text content');
+            return '[PDF uploaded but contains no extractable text]';
+        }
+        
+        // Limit text to 50000 characters to avoid token overload
+        let extractedText = fullText.substring(0, 50000);
+        if (fullText.length > 50000) {
+            console.log(`[PDF] Text truncated from ${fullText.length} to 50000 characters`);
+            extractedText += '\n\n[Text truncated due to length...]';
+        }
+        
+        return extractedText;
+    } catch (err) {
+        console.error('[PDF] ❌ Error extracting PDF text:', err.message);
+        return `[Error extracting PDF text: ${err.message}]`;
+    }
 }
 
 async function extractDocxText(buffer) {
@@ -1859,7 +1911,9 @@ async function extractZipContents(buffer) {
     } catch { return '[Could not extract ZIP content]'; }
 }
 
-function isVisualFile(mimetype) { return mimetype.startsWith('image/'); }
+function isVisualFile(mimetype) { 
+    return mimetype.startsWith('image/') || mimetype.startsWith('video/'); 
+}
 
 function isTextDocument(mimetype, originalname) {
     const ext = path.extname(originalname || '').toLowerCase();
@@ -1874,28 +1928,14 @@ async function buildFileParts(files, client = null) {
     for (const file of files) {
         const { mimetype, buffer, originalname, size } = file;
         if (!buffer || buffer.length === 0) { fileDescriptions.push(`[Skipped empty file: ${originalname}]`); continue; }
+
         if (isVisualFile(mimetype)) {
             parts.push({ inlineData: { mimeType: mimetype, data: buffer.toString('base64') } });
-            fileDescriptions.push(`[Attached image: ${originalname}]`);
+            fileDescriptions.push(`[Attached ${mimetype.startsWith('video/') ? 'video' : 'image'}: ${originalname}]`);
         } else if (mimetype === 'application/pdf') {
-            if (client && client.files) {
-                try {
-                    const tempPath = path.join(UPLOADS_DIR, `temp-${uuidv4()}.pdf`);
-                    fs.writeFileSync(tempPath, buffer);
-                    const uploadResult = await client.files.upload({ file: tempPath, mimeType: 'application/pdf' });
-                    try { fs.unlinkSync(tempPath); } catch (e) {} // Clean up
-                    parts.push({ fileData: { mimeType: uploadResult.mimeType || 'application/pdf', fileUri: uploadResult.uri } });
-                    fileDescriptions.push(`[Attached PDF: ${originalname}]`);
-                    pdfUris.push(uploadResult.uri);
-                } catch (err) {
-                    console.error('[PDF Upload Error]', err);
-                    parts.push({ text: `\n\n[Failed to upload PDF "${originalname}": ${err.message}]` });
-                    fileDescriptions.push(`[Failed to attach PDF: ${originalname}]`);
-                }
-            } else {
-                parts.push({ text: `\n\n📄 Content of uploaded PDF file "${originalname}":\n\`\`\`\n${await extractPdfText(buffer)}\n\`\`\`` });
-                fileDescriptions.push(`[Attached PDF: ${originalname}]`);
-            }
+            // PDF can also be sent as inlineData to Gemini 1.5/2.0
+            parts.push({ inlineData: { mimeType: mimetype, data: buffer.toString('base64') } });
+            fileDescriptions.push(`[Attached PDF: ${originalname}]`);
         } else if (mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
             parts.push({ text: `\n\n📄 Content of uploaded DOCX file "${originalname}":\n\`\`\`\n${await extractDocxText(buffer)}\n\`\`\`` });
             fileDescriptions.push(`[Attached DOCX: ${originalname}]`);
@@ -2147,7 +2187,10 @@ app.post('/api/chat', optionalUserAuth, upload.array('files', 10), async (req, r
             }
         }
 
-        if (!message && files.length === 0 && processedFiles.length === 0) {
+        // Check if inlineData (base64 files) was provided
+        const hasInlineData = req.body.inlineData && Array.isArray(req.body.inlineData) && req.body.inlineData.length > 0;
+
+        if (!message && files.length === 0 && processedFiles.length === 0 && !hasInlineData) {
             return res.status(400).json({ error: 'Message or files required' });
         }
 
@@ -2246,6 +2289,8 @@ app.post('/api/chat', optionalUserAuth, upload.array('files', 10), async (req, r
                 config: { systemInstruction: currentSystemPrompt, temperature: parseFloat(temperature) },
                 buildContents: async (client) => {
                     const userParts = [];
+                    let pdfContent = []; // Collect PDF text to merge into message
+                    let imageFiles = []; // Collect image files for inlineData
                     let fileDescriptions = [];
                     let pdfUris = [];
 
@@ -2258,12 +2303,60 @@ app.post('/api/chat', optionalUserAuth, upload.array('files', 10), async (req, r
                     if (files.length > 0) {
                         console.log('[Chat] Processing raw files from FormData');
                         const result = await buildFileParts(files, client);
-                        userParts.push(...result.parts);
+                        
+                        // Separate images/video/pdf from text content
+                        for (const part of result.parts) {
+                            if (part.inlineData) {
+                                imageFiles.push(part);
+                            } else if (part.text) {
+                                pdfContent.push(part.text);
+                            }
+                        }
                         fileDescriptions.push(...result.fileDescriptions);
                         pdfUris.push(...result.pdfUris);
                     }
 
-                    // 2. Process pre-processed files (e.g. from /api/preprocess-files)
+                    // 2. Process inlineData from req.body (e.g. direct base64)
+                    if (req.body.inlineData && Array.isArray(req.body.inlineData)) {
+                        console.log('[Chat] Processing inlineData from request body:', req.body.inlineData.length, 'items');
+                        for (const item of req.body.inlineData) {
+                            if (!item.mimeType || !item.data) {
+                                console.log('[Chat] ⚠️ Skipping inlineData: missing mimeType or data');
+                                continue;
+                            }
+                            
+                            // Validate data is a string and not too large
+                            if (typeof item.data !== 'string') {
+                                console.log('[Chat] ⚠️ Skipping inlineData: data is not a string, type:', typeof item.data);
+                                continue;
+                            }
+                            if (item.data.length === 0) {
+                                console.log('[Chat] ⚠️ Skipping inlineData: data is empty');
+                                continue;
+                            }
+                            
+                            // Check if data still has the data URL prefix (should be stripped on frontend)
+                            if (item.data.startsWith('data:')) {
+                                console.warn('[Chat] ⚠️ inlineData still has data URL prefix, stripping it');
+                                const commaIndex = item.data.indexOf(',');
+                                if (commaIndex > -1) {
+                                    item.data = item.data.substring(commaIndex + 1);
+                                }
+                            }
+                            
+                            // Validate base64 format (should only contain alphanumeric, +, /, =)
+                            if (!/^[A-Za-z0-9+/=]*$/.test(item.data)) {
+                                console.log('[Chat] ⚠️ Skipping inlineData: data contains invalid base64 characters');
+                                continue;
+                            }
+                            
+                            console.log('[Chat] ✓ inlineData valid - mimeType:', item.mimeType, 'size:', item.data.length, 'bytes');
+                            imageFiles.push({ inlineData: item });
+                            fileDescriptions.push(`[Attached file: ${item.mimeType}]`);
+                        }
+                    }
+
+                    // 3. Process pre-processed files (e.g. from /api/preprocess-files)
                     if (processedFiles && processedFiles.length > 0) {
                         console.log('[Chat] Processing pre-processed files');
                         for (const pf of processedFiles) {
@@ -2280,12 +2373,28 @@ app.post('/api/chat', optionalUserAuth, upload.array('files', 10), async (req, r
                                 console.log(`[Chat] File found, size: ${buffer.length} bytes`);
                                 if (isVisualFile(pf.type)) {
                                     console.log(`[Chat] ✓ Processing as visual file (type: ${pf.type})`);
-                                    userParts.push({ inlineData: { mimeType: pf.type, data: buffer.toString('base64') } });
-                                    fileDescriptions.push(`[Attached image: ${pf.name}]`);
+                                    imageFiles.push({ inlineData: { mimeType: pf.type, data: buffer.toString('base64') } });
+                                    fileDescriptions.push(`[Image: ${pf.name}]`);
+                                } else if (pf.type === 'application/pdf') {
+                                    console.log(`[Chat] ✓ Processing as PDF (type: ${pf.type})`);
+                                    try {
+                                        const extractedText = await extractPdfText(buffer);
+                                        // Only add to pdfContent if extraction was successful
+                                        if (!extractedText.includes('Error extracting') && !extractedText.includes('no extractable text')) {
+                                            pdfContent.push(`📄 PDF: "${pf.name}"\n${extractedText}`);
+                                            fileDescriptions.push(`[PDF: ${pf.name}]`);
+                                            console.log(`[Chat] ✓ PDF text extracted and merged into message`);
+                                        } else {
+                                            console.log(`[Chat] ⚠️  PDF extraction had issues, skipping content`);
+                                            fileDescriptions.push(`[PDF: ${pf.name}]`);
+                                        }
+                                    } catch (err) {
+                                        console.error('[Chat] ❌ Error extracting PDF:', err.message);
+                                        fileDescriptions.push(`[PDF: ${pf.name}]`);
+                                    }
                                 } else {
-                                    console.log(`[Chat] ✗ Not a visual file (type: ${pf.type}), treating as text/unsupported`);
-                                    // Handle other types if necessary, currently treat as text/unsupported
-                                    fileDescriptions.push(`[Attached file: ${pf.name} (type: ${pf.type})]`);
+                                    console.log(`[Chat] ✗ Not a visual file or PDF (type: ${pf.type}), treating as unsupported`);
+                                    fileDescriptions.push(`[File: ${pf.name}]`);
                                 }
                             } else {
                                 console.log('[Chat] ❌ File not found:', filePath);
@@ -2293,15 +2402,23 @@ app.post('/api/chat', optionalUserAuth, upload.array('files', 10), async (req, r
                         }
                     }
 
+                    // Add images to userParts
+                    userParts.push(...imageFiles);
+
+                    // Combine message with PDF content
+                    const fullMessage = [
+                        ...pdfContent,
+                        message || 'Please analyze the attached file(s).'
+                    ].filter(Boolean).join('\n\n');
+                    
+                    userParts.push({ text: fullMessage });
+
                     console.log('[Chat] Final userParts structure:', JSON.stringify(userParts.map(p => ({ 
                         type: p.inlineData ? 'inlineData' : p.text ? 'text' : 'other',
                         mimeType: p.inlineData?.mimeType,
                         dataLength: p.inlineData?.data?.length,
                         textLength: p.text?.length
                     })), null, 2));
-
-                    if (message) userParts.push({ text: message });
-                    else if (files.length > 0 || (processedFiles && processedFiles.length > 0)) userParts.push({ text: 'Please analyze the attached file(s).' });
 
                     const baseText = [message, ...fileDescriptions].filter(Boolean).join('\n');
                     const uriTags = [
@@ -2320,7 +2437,7 @@ app.post('/api/chat', optionalUserAuth, upload.array('files', 10), async (req, r
                         historyToUse[historyToUse.length - 1].parts[0].text = historyText;
                     }
                     
-                    console.log('[Chat] Final request to API will include', userParts.length, 'parts');
+                    console.log('[Chat] Final request to API will include', userParts.length, 'parts with message length:', fullMessage.length);
                     return [...historyToUse.slice(0, -1), { role: "user", parts: userParts }];
                 }
             }, true)
