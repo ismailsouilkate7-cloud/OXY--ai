@@ -1757,6 +1757,30 @@ async function executeWithRetry(params, isStream = true, opts = {}) {
             }
             
             const reqData = { model: params.model, contents: finalContents, config: params.config };
+            
+            // Log the API request structure for debugging
+            console.log('[AI] 📋 API Request Structure:');
+            console.log(`  - Model: ${reqData.model}`);
+            console.log(`  - System Instruction: ${reqData.config?.systemInstruction?.substring(0, 100) || 'none'}...`);
+            console.log(`  - Temperature: ${reqData.config?.temperature}`);
+            if (finalContents && finalContents.length > 0) {
+                const lastMsg = finalContents[finalContents.length - 1];
+                if (lastMsg.parts && lastMsg.parts.length > 0) {
+                    console.log(`  - Last Message Parts: ${lastMsg.parts.length} parts`);
+                    for (let i = 0; i < lastMsg.parts.length; i++) {
+                        const part = lastMsg.parts[i];
+                        if (part.inlineData) {
+                            console.log(`    [${i}] inlineData: mimeType=${part.inlineData.mimeType}, dataSize=${part.inlineData.data.length} bytes`);
+                        } else if (part.text) {
+                            console.log(`    [${i}] text: ${part.text.substring(0, 80)}...`);
+                        } else if (part.fileData) {
+                            console.log(`    [${i}] fileData: mimeType=${part.fileData.mimeType}, uri=${part.fileData.fileUri}`);
+                        } else {
+                            console.log(`    [${i}] ${Object.keys(part)[0] || 'unknown'}`);
+                        }
+                    }
+                }
+            }
 
             const stream = isStream
                 ? await client.models.generateContentStream(reqData)
@@ -1930,6 +1954,7 @@ app.post('/api/preprocess-files', upload.array('files', 10), async (req, res) =>
             safeSseWrite(res, `data: ${JSON.stringify({ 
                 fileId, 
                 name: file.originalname, 
+                type: file.mimetype, 
                 status: 'ready', 
                 progress: 100, 
                 url: `/uploads/${safeName}` 
@@ -2224,8 +2249,14 @@ app.post('/api/chat', optionalUserAuth, upload.array('files', 10), async (req, r
                     let fileDescriptions = [];
                     let pdfUris = [];
 
+                    console.log(`[Chat] Starting file processing: raw files=${files.length}, processed files=${processedFiles ? processedFiles.length : 0}`);
+                    if (processedFiles && processedFiles.length > 0) {
+                        console.log('[Chat] Processed files data:', JSON.stringify(processedFiles.map(pf => ({ name: pf.name, type: pf.type, url: pf.url })), null, 2));
+                    }
+
                     // 1. Process raw files (e.g. direct upload)
                     if (files.length > 0) {
+                        console.log('[Chat] Processing raw files from FormData');
                         const result = await buildFileParts(files, client);
                         userParts.push(...result.parts);
                         fileDescriptions.push(...result.fileDescriptions);
@@ -2234,27 +2265,40 @@ app.post('/api/chat', optionalUserAuth, upload.array('files', 10), async (req, r
 
                     // 2. Process pre-processed files (e.g. from /api/preprocess-files)
                     if (processedFiles && processedFiles.length > 0) {
+                        console.log('[Chat] Processing pre-processed files');
                         for (const pf of processedFiles) {
-                            if (!pf.url) continue;
+                            if (!pf.url) {
+                                console.log('[Chat] Skipping file: missing url', pf.name);
+                                continue;
+                            }
                             
                             // Load file from /uploads/
                             const filePath = path.join(UPLOADS_DIR, path.basename(pf.url));
+                            console.log(`[Chat] Checking file: ${pf.name} (type: ${pf.type}, path: ${filePath})`);
                             if (fs.existsSync(filePath)) {
                                 const buffer = fs.readFileSync(filePath);
+                                console.log(`[Chat] File found, size: ${buffer.length} bytes`);
                                 if (isVisualFile(pf.type)) {
+                                    console.log(`[Chat] ✓ Processing as visual file (type: ${pf.type})`);
                                     userParts.push({ inlineData: { mimeType: pf.type, data: buffer.toString('base64') } });
                                     fileDescriptions.push(`[Attached image: ${pf.name}]`);
                                 } else {
+                                    console.log(`[Chat] ✗ Not a visual file (type: ${pf.type}), treating as text/unsupported`);
                                     // Handle other types if necessary, currently treat as text/unsupported
                                     fileDescriptions.push(`[Attached file: ${pf.name} (type: ${pf.type})]`);
                                 }
                             } else {
-                                console.log('[Chat] File not found for preprocessing:', filePath);
+                                console.log('[Chat] ❌ File not found:', filePath);
                             }
                         }
                     }
 
-                    console.log('[Chat] Constructed userParts:', JSON.stringify(userParts.map(p => p.inlineData ? { inlineData: 'present', mimeType: p.inlineData.mimeType } : p), null, 2));
+                    console.log('[Chat] Final userParts structure:', JSON.stringify(userParts.map(p => ({ 
+                        type: p.inlineData ? 'inlineData' : p.text ? 'text' : 'other',
+                        mimeType: p.inlineData?.mimeType,
+                        dataLength: p.inlineData?.data?.length,
+                        textLength: p.text?.length
+                    })), null, 2));
 
                     if (message) userParts.push({ text: message });
                     else if (files.length > 0 || (processedFiles && processedFiles.length > 0)) userParts.push({ text: 'Please analyze the attached file(s).' });
@@ -2276,6 +2320,7 @@ app.post('/api/chat', optionalUserAuth, upload.array('files', 10), async (req, r
                         historyToUse[historyToUse.length - 1].parts[0].text = historyText;
                     }
                     
+                    console.log('[Chat] Final request to API will include', userParts.length, 'parts');
                     return [...historyToUse.slice(0, -1), { role: "user", parts: userParts }];
                 }
             }, true)
