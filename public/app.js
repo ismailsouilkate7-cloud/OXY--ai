@@ -163,6 +163,21 @@ async function checkAuth() {
     }
 }
 
+function updateWelcomeGreeting() {
+    try {
+        const now = new Date(); const hour = now.getHours();
+        let part = 'Good day';
+        if (hour >= 5 && hour < 12) part = 'Good morning';
+        else if (hour >= 12 && hour < 18) part = 'Good afternoon';
+        else part = 'Good evening';
+        const name = userName || 'User';
+        const titleEl = document.querySelector('#welcome-screen h1');
+        const subEl = document.querySelector('#welcome-screen p');
+        if (titleEl) titleEl.textContent = `${part}, ${name}`;
+        if (subEl) subEl.textContent = 'How can I help you today?';
+    } catch (e) { /* no-op */ }
+}
+
 document.getElementById('logout-btn')?.addEventListener('click', async () => {
     try {
         await fetch('/api/auth/logout', { method: 'POST' });
@@ -247,6 +262,7 @@ function createNewSession() {
     pendingFiles = [];
     updateFilePreviewStrip();
     loadSessionsList();
+    updateWelcomeGreeting();
 }
 
 document.getElementById('new-chat-btn').addEventListener('click', createNewSession);
@@ -255,43 +271,42 @@ clearChatBtn.addEventListener('click', () => { if (confirm("Are you sure you wan
 const sidebarOverlay = document.getElementById('sidebar-overlay');
 
 function openSidebar() {
-    if (window.innerWidth <= 1024) { sidebar.classList.add('open'); sidebarOverlay.classList.add('active'); }
-    else { sidebar.classList.remove('closed'); }
-    if (typeof OXYPersistence !== 'undefined') OXYPersistence.setItem('oxy_sidebar_closed', false);
+    sidebar.classList.add('open');
+    sidebar.classList.remove('closed');
+    sidebarOverlay.classList.add('active');
+    document.body.style.overflow = 'hidden';
+    if (typeof OXYPersistence !== 'undefined') OXYPersistence.setItem('oxy_sidebar_open', true);
 }
 function closeSidebar() {
-    if (window.innerWidth <= 1024) { sidebar.classList.remove('open'); sidebarOverlay.classList.remove('active'); }
-    else { sidebar.classList.add('closed'); }
-    if (typeof OXYPersistence !== 'undefined') OXYPersistence.setItem('oxy_sidebar_closed', true);
+    sidebar.classList.remove('open');
+    sidebar.classList.add('closed');
+    sidebarOverlay.classList.remove('active');
+    document.body.style.overflow = '';
+    if (typeof OXYPersistence !== 'undefined') OXYPersistence.setItem('oxy_sidebar_open', false);
 }
 function isSidebarOpen() {
-    if (window.innerWidth <= 1024) return sidebar.classList.contains('open');
-    return !sidebar.classList.contains('closed');
+    return sidebar.classList.contains('open');
 }
 
 const sidebarToggleBtn = document.getElementById('sidebar-toggle-btn');
-sidebarToggleBtn.addEventListener('click', () => { isSidebarOpen() ? closeSidebar() : openSidebar(); });
-if (mobileMenuBtn) mobileMenuBtn.addEventListener('click', () => { isSidebarOpen() ? closeSidebar() : openSidebar(); });
+sidebarToggleBtn.addEventListener('click', (e) => { e.stopPropagation(); isSidebarOpen() ? closeSidebar() : openSidebar(); });
+if (mobileMenuBtn) mobileMenuBtn.addEventListener('click', (e) => { e.stopPropagation(); isSidebarOpen() ? closeSidebar() : openSidebar(); });
+// Header new chat button (minimal header)
+document.getElementById('header-new-chat-btn')?.addEventListener('click', createNewSession);
 
+// Close sidebar when clicking outside
+sidebarOverlay?.addEventListener('click', (e) => { e.stopPropagation(); closeSidebar(); });
+document.getElementById('sidebar-close-btn')?.addEventListener('click', (e) => { e.stopPropagation(); closeSidebar(); });
 document.addEventListener('click', (e) => {
     if (!isSidebarOpen()) return;
     if (sidebarToggleBtn?.contains(e.target)) return;
-    if (mobileMenuBtn?.contains(e.target)) return;
-    if (sidebar.contains(e.target)) return;
-    if (sidebarOverlay?.contains(e.target)) return;
+    if (sidebar?.contains(e.target)) return;
     closeSidebar();
 });
-sidebarOverlay?.addEventListener('click', closeSidebar);
 
-let _lastIsTablet = null;
+// Close sidebar on window resize
 window.addEventListener('resize', () => {
-    const isTablet = window.innerWidth <= 1024;
-    if (_lastIsTablet === null) { _lastIsTablet = isTablet; return; }
-    if (isTablet !== _lastIsTablet) {
-        _lastIsTablet = isTablet;
-        if (isTablet) { sidebar.classList.remove('open'); sidebarOverlay.classList.remove('active'); document.body.style.overflow = ''; }
-        else { sidebar.classList.remove('open'); sidebarOverlay.classList.remove('active'); document.body.style.overflow = ''; sidebar.classList.remove('closed'); }
-    }
+    if (isSidebarOpen()) closeSidebar();
 });
 
 let attachMenuOpen = false;
@@ -1012,6 +1027,7 @@ async function initApp() {
     const isAuthenticated = await checkAuth();
     if (!isAuthenticated) return;
     updateUserUI(); loadSessionsList(); initLocation();
+    closeSidebar(); // Ensure sidebar starts closed
     if (!currentSessionId) createNewSession();
 }
 

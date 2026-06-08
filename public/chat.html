@@ -2,11 +2,10 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <title>OXY AI</title>
-    <meta name="description" content="OXY AI — Your intelligent, natural conversational assistant with multimodal capabilities. Upload images...">
+    <meta name="description" content="OXY AI — Your intelligent, natural conversational assistant with multimodal capabilities.">
     
-    <!-- SEO & Open Graph Metadata -->
     <meta property="og:title" content="OXY AI">
     <meta property="og:description" content="Your intelligent, natural conversational assistant with multimodal capabilities.">
     <meta property="og:type" content="website">
@@ -16,30 +15,25 @@
     <meta name="twitter:description" content="Your intelligent, natural conversational assistant with multimodal capabilities.">
     <meta name="twitter:image" content="/icons/icon-512.png">
 
-    <!-- PWA & Mobile Settings -->
     <link rel="manifest" href="/manifest.json">
-    <meta name="theme-color" content="#FFFFFF">
+    <meta name="theme-color" content="#0f0f0f">
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
-    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="OXY AI">
     <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 
-    <!-- Favicon: transparent black ring (no background) — crisp SVG + PNG fallback -->
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
 
     <link rel="stylesheet" href="style.css">
-    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
-    <!-- Font Awesome for Icons -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <!-- Marked for Markdown parsing -->
+    
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.0.3/purify.min.js"></script>
-    <!-- Highlight.js for code syntax highlighting -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/styles/github-dark.min.css">
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/highlight.min.js"></script>
-    <!-- Load additional languages for better auto-detection -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/languages/javascript.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/languages/typescript.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/languages/python.min.js"></script>
@@ -51,72 +45,61 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.8.0/languages/diff.min.js"></script>
     <script src="widget-renderer.js"></script>
     <script src="pdf-viewer.js"></script>
-
-    <!-- Google tag (gtag.js) -->
-    <script async src="https://www.googletagmanager.com/gtag/js?id=G-751P6JLE8N"></script>
-    <script>
-        window.dataLayer = window.dataLayer || [];
-        function gtag(){dataLayer.push(arguments);}
-        gtag('js', new Date());
-        gtag('config', 'G-751P6JLE8N');
-    </script>
-
-    <script type="text/javascript">
-    (function(c,l,a,r,i,t,y){
-        c[a]=c[a]||function(){(c[a].q=c[a].q||[]).push(arguments)};
-        t=l.createElement(r);t.async=1;t.src="https://www.clarity.ms/tag/"+i;
-        y=l.getElementsByTagName(r)[0];y.parentNode.insertBefore(t,y);
-    })(window, document, "clarity", "script", "x18lk9u96h");
-    </script>
-
 </head>
 <body>
     <div class="app-container">
         <!-- Sidebar Overlay (mobile/tablet) -->
         <div class="sidebar-overlay" id="sidebar-overlay"></div>
 
-        <!-- Sidebar -->
+        <!-- Sidebar Overlay -->
+        <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
+        <!-- Sidebar — Floating Popup -->
         <aside class="sidebar">
-            <div class="logo-container">
-                <div class="logo-ring" aria-label="OXY AI logo">
-                    <div class="logo-ring-glow"></div>
-                </div>
-                <div class="logo-text-wrap">
-                    <span class="logo-oxy">OXY</span>
-                    <span class="logo-ai">AI</span>
-                </div>
+            <div class="sidebar-header">
+                <span class="sidebar-title">OXY AI</span>
+                <button class="sidebar-close-btn" id="sidebar-close-btn" title="Close">
+                    <i class="fa-solid fa-times"></i>
+                </button>
             </div>
-            <button class="new-chat-btn" id="new-chat-btn">
-                <i class="fa-solid fa-plus"></i> New Chat
+            
+            <button class="sidebar-action-btn new-chat-btn" id="new-chat-btn">
+                <i class="fa-solid fa-plus"></i>
+                <span>New Chat</span>
             </button>
-            <div class="recent-chats">
-                <div class="recent-chat-title">Recent Conversations</div>
+            
+            <div class="sidebar-section">
+                <div class="sidebar-section-title">Recent</div>
                 <div class="chat-list" id="chat-list">
-                    <!-- Chats will populate here -->
+                    <!-- Populated by JS -->
                 </div>
             </div>
-            <div class="user-profile">
-                <div class="logo-ring avatar-ring-sm" aria-label="OXY AI logo">
-                    <div class="logo-ring-glow"></div>
+            
+            <div class="sidebar-footer">
+                <div class="user-profile">
+                    <div class="user-avatar" id="user-avatar-display">U</div>
+                    <div class="user-info">
+                        <span class="user-name" id="user-name-display">User</span>
+                        
+                    </div>
                 </div>
-                <div class="user-info">
-                    <span class="user-name" id="user-name-display">User</span>
-                </div>
-                <i class="fa-solid fa-right-from-bracket settings-icon" id="logout-btn" title="Log Out"></i>
+                <button class="logout-btn" id="logout-btn" title="Log Out">
+                    <i class="fa-solid fa-arrow-right-from-bracket"></i>
+                </button>
             </div>
         </aside>
 
         <!-- Main Chat Area -->
         <main class="chat-main">
             <header class="chat-header">
-                <div class="sidebar-toggle-btn" id="sidebar-toggle-btn" title="Toggle Sidebar">
-                    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
-                        <line x1="9" y1="3" x2="9" y2="21"></line>
-                    </svg>
+                <div class="header-left">
+                    <button class="sidebar-toggle-btn" id="sidebar-toggle-btn" title="Toggle Sidebar">☰</button>
                 </div>
-                
-                <div class="header-actions">
+                <div class="header-center">
+                    <div class="header-title">OXY AI</div>
+                </div>
+                <div class="header-right">
+                    <button class="action-btn" id="header-new-chat-btn" title="New Chat"><i class="fa-solid fa-pen"></i></button>
                     <button class="action-btn" id="share-btn" title="Share"><i class="fa-solid fa-share-nodes"></i></button>
                     <button class="action-btn" id="clear-chat-btn" title="Clear Chat"><i class="fa-solid fa-trash"></i></button>
                 </div>
@@ -125,40 +108,42 @@
             <!-- Drop Zone Overlay -->
             <div class="drop-zone-overlay" id="drop-zone-overlay">
                 <div class="drop-zone-content">
-                    <div class="drop-zone-icon">
-                        <i class="fa-solid fa-cloud-arrow-up"></i>
-                    </div>
+                    <div class="drop-zone-icon"><i class="fa-solid fa-cloud-arrow-up"></i></div>
                     <h3>Drop files here</h3>
                     <p>Images, documents, code files</p>
                 </div>
             </div>
 
             <div class="chat-container" id="chat-container">
-                <!-- Welcome Message -->
+                <!-- Welcome Screen -->
                 <div class="welcome-screen" id="welcome-screen">
                     <div class="welcome-icon"><i class="fa-solid fa-sparkles"></i></div>
-                    <h2>Welcome to OXY AI</h2>
+                    <h1>Welcome to OXY AI</h1>
                     <p>Your intelligent, natural conversational assistant</p>
                     
                     <div class="suggestion-cards">
-                        <div class="suggestion-card" onclick="sendSuggestion('Write a funny poem about coding bugs')">
+                        <button class="suggestion-card" onclick="sendSuggestion('Write a funny poem about coding bugs')">
                             <i class="fa-solid fa-pen-nib"></i>
                             <span>Write a funny poem about coding bugs</span>
-                        </div>
-                        <div class="suggestion-card" onclick="sendSuggestion('can you help me in my work?')">
+                        </button>
+                        <button class="suggestion-card" onclick="sendSuggestion('can you help me in my work?')">
                             <i class="fa-solid fa-language"></i>
-                            <span>can you help me in my work?</span>
-                        </div>
-                        <div class="suggestion-card" onclick="sendSuggestion(`Explain artificial intelligence in Darija`)">
+                            <span>Can you help me in my work?</span>
+                        </button>
+                        <button class="suggestion-card" onclick="sendSuggestion(`Explain artificial intelligence in Darija`)">
                             <i class="fa-solid fa-brain"></i>
                             <span>Explain artificial intelligence in Darija</span>
-                        </div>
+                        </button>
+                        <button class="suggestion-card" onclick="sendSuggestion('Write a JavaScript function to sort an array')">
+                            <i class="fa-solid fa-code"></i>
+                            <span>Write a JavaScript function to sort an array</span>
+                        </button>
                     </div>
                 </div>
                 
                 <div class="messages-wrapper" id="messages-wrapper"></div>
                 
-                <!-- Typing Indicator (Hidden by default) -->
+                <!-- Typing Indicator -->
                 <div class="typing-indicator" id="typing-indicator">
                     <span></span><span></span><span></span>
                 </div>
@@ -186,7 +171,6 @@
                     <div class="attach-menu-container" id="attach-menu-container">
                         <button class="attach-btn" id="attach-btn" title="Attach files"><i class="fa-solid fa-plus"></i></button>
                         
-                        <!-- Floating Attachment Menu -->
                         <div class="attach-menu" id="attach-menu">
                             <button class="attach-menu-item" id="menu-add-files">
                                 <div class="attach-menu-icon"><i class="fa-solid fa-paperclip"></i></div>
@@ -218,7 +202,7 @@
         </main>
     </div>
 
-    <!-- Camera Capture Modal -->
+    <!-- Camera Modal -->
     <div class="camera-modal" id="camera-modal" style="display: none;">
         <div class="camera-modal-content">
             <div class="camera-header">
@@ -236,7 +220,7 @@
                 <button class="camera-capture-btn" id="camera-capture-btn" title="Capture">
                     <div class="capture-ring"></div>
                 </button>
-                <div style="width: 44px;"></div> <!-- spacer for centering -->
+                <div style="width: 44px;"></div>
             </div>
         </div>
     </div>
@@ -248,16 +232,14 @@
                 <h3><i class="fa-solid fa-clock-rotate-left"></i> Recent Files</h3>
                 <button class="recent-files-close-btn" id="recent-files-close-btn"><i class="fa-solid fa-xmark"></i></button>
             </div>
-            <div class="recent-files-body" id="recent-files-body">
-                <!-- Files populate here -->
-            </div>
+            <div class="recent-files-body" id="recent-files-body"></div>
             <div class="recent-files-footer">
                 <span class="recent-files-hint"><i class="fa-solid fa-circle-info"></i> Click a file to re-upload it from your device</span>
             </div>
         </div>
     </div>
 
-    <!-- Lightbox Modal (ChatGPT-style image viewer) -->
+    <!-- Lightbox Modal -->
     <div class="lightbox-modal" id="lightbox-modal">
         <button class="lightbox-close" id="lightbox-close"><i class="fa-solid fa-xmark"></i></button>
         <img id="lightbox-img" src="" alt="">
@@ -267,7 +249,6 @@
 
     <!-- Toast Container -->
     <div class="toast-container" id="toast-container"></div>
-
 
     <script src="persistence.js"></script>
     <script src="app.js"></script>
