@@ -1,5 +1,5 @@
 // ============================================================
-// OXY AI — Safe Persistence System with Strict Cache Control
+// souilX — Safe Persistence System with Strict Cache Control
 // ============================================================
 
 ;(function() {
@@ -11,14 +11,14 @@
     // ─── WHITELIST: Only these keys are allowed to persist ───
     // Never persist: loading states, API fetch states, ephemeral UI flags
     const ALLOWED_KEYS = [
-        'oxy_user_location',
-        'oxy_recent_files',
-        'oxy_sidebar_closed',
-        'oxy_theme'
+        'souilx_user_location',
+        'souilx_recent_files',
+        'souilx_sidebar_closed',
+        'souilx_theme'
     ];
 
     // ─── VERSION TRACKING ───
-    const VERSION_KEY = 'oxy_app_version';
+    const VERSION_KEY = 'souilx_app_version';
 
     // ─── STORAGE SIZE LIMIT (4.5 MB — conservative for 5 MB quota) ───
     const MAX_STORAGE_BYTES = 4.5 * 1024 * 1024;
@@ -113,11 +113,11 @@
             }
         }
 
-        // Remove any OXY keys that are NOT in the whitelist (stale data)
+        // Remove any souilX keys that are NOT in the whitelist (stale data)
         const keysToRemove = [];
         for (let i = 0; i < localStorage.length; i++) {
             const key = localStorage.key(i);
-            if (key && key.startsWith('oxy_') && !ALLOWED_KEYS.includes(key) && key !== VERSION_KEY) {
+            if (key && key.startsWith('souilx_') && !ALLOWED_KEYS.includes(key) && key !== VERSION_KEY) {
                 keysToRemove.push(key);
             }
         }
@@ -164,7 +164,7 @@
                 'Cleaning up less critical data...');
 
             // Remove least critical items first
-            const removalOrder = ['oxy_recent_files', 'oxy_user_location', 'oxy_sidebar_closed'];
+            const removalOrder = ['souilx_recent_files', 'souilx_user_location', 'souilx_sidebar_closed'];
             for (const key of removalOrder) {
                 const raw = localStorage.getItem(key);
                 if (raw) {
@@ -345,7 +345,7 @@
     // ============================================================
 
     /**
-     * Safe clear: remove only OXY-managed keys, keeping everything else.
+     * Safe clear: remove only souilX-managed keys, keeping everything else.
      * Call this for "Clear Cache" / "Reset Settings" actions.
      */
     function safeClear() {
@@ -360,7 +360,7 @@
     }
 
     /**
-     * Force full clear — removes all oxy_ keys including version.
+     * Force full clear — removes all souilx_ keys including version.
      * Use only as a last resort or explicit user request.
      */
     function fullClear() {
@@ -368,7 +368,7 @@
         const keysToRemove = [];
         for (let i = 0; i < localStorage.length; i++) {
             const key = localStorage.key(i);
-            if (key && key.startsWith('oxy_')) {
+            if (key && key.startsWith('souilx_')) {
                 keysToRemove.push(key);
             }
         }
@@ -437,7 +437,7 @@
     //  EXPORT PUBLIC API
     // ============================================================
 
-    window.OXYPersistence = {
+    window.souilXPersistence = {
         // Core
         validateCache,
         hydrate,

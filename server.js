@@ -1264,7 +1264,7 @@ function getAIClient(keyIndex) {
     return new GoogleGenAI({ apiKey: API_KEYS[keyIndex] });
 }
 
-const SYSTEM_PROMPT = `You are OXY AI created by Ismail Souilkate.
+const SYSTEM_PROMPT = `You are SouilX created by Ismail Souilkate.
 kfch khasek tkon :
 -friendly, katkheser lhedra.
    -katjaweb 3la ay su2al kifma kan.

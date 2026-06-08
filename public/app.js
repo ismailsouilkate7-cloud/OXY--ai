@@ -1,5 +1,5 @@
 // ============================================================
-// OXY AI — Full Multimodal Chat App
+// souilX — Full Multimodal Chat App
 // ============================================================
 
 // === DOM ELEMENTS ===
@@ -18,7 +18,7 @@ const clearChatBtn = document.getElementById('clear-chat-btn');
 const shareBtn = document.getElementById('share-btn');
 
 // === LOCATION SERVICE ===
-let userLocation = (typeof OXYPersistence !== 'undefined' ? OXYPersistence.getItem('oxy_user_location') : localStorage.getItem('oxy_user_location')) || null;
+let userLocation = (typeof souilXPersistence !== 'undefined' ? souilXPersistence.getItem('souilx_user_location') : localStorage.getItem('souilx_user_location')) || null;
 
 async function fetchUserLocation() {
     try {
@@ -36,10 +36,10 @@ function initLocation() {
     fetchUserLocation().then(location => {
         if (location) {
             userLocation = location;
-            if (typeof OXYPersistence !== 'undefined') {
-                OXYPersistence.setItemSync('oxy_user_location', location);
+            if (typeof souilXPersistence !== 'undefined') {
+                souilXPersistence.setItemSync('souilx_user_location', location);
             } else {
-                localStorage.setItem('oxy_user_location', location);
+                localStorage.setItem('souilx_user_location', location);
             }
             if (OXYWidgetRenderer && OXYWidgetRenderer.setUserLocation) {
                 OXYWidgetRenderer.setUserLocation(location);
@@ -96,11 +96,11 @@ let cameraFacingMode = 'user';
 let fileIdCounter = 0;
 
 function getRecentFiles() {
-    if (typeof OXYPersistence !== 'undefined') {
-        const val = OXYPersistence.getItem('oxy_recent_files');
+    if (typeof souilXPersistence !== 'undefined') {
+        const val = souilXPersistence.getItem('souilx_recent_files');
         return Array.isArray(val) ? val : [];
     }
-    try { return JSON.parse(localStorage.getItem('oxy_recent_files') || '[]'); } catch { return []; }
+    try { return JSON.parse(localStorage.getItem('souilx_recent_files') || '[]'); } catch { return []; }
 }
 
 function addRecentFile(fileInfo) {
@@ -109,10 +109,10 @@ function addRecentFile(fileInfo) {
     if (existing !== -1) recent.splice(existing, 1);
     recent.unshift({ name: fileInfo.name, type: fileInfo.type, size: fileInfo.size, addedAt: Date.now() });
     if (recent.length > 20) recent.pop();
-    if (typeof OXYPersistence !== 'undefined') {
-        OXYPersistence.setItemSync('oxy_recent_files', recent);
+    if (typeof souilXPersistence !== 'undefined') {
+        souilXPersistence.setItemSync('souilx_recent_files', recent);
     } else {
-        localStorage.setItem('oxy_recent_files', JSON.stringify(recent));
+        localStorage.setItem('souilx_recent_files', JSON.stringify(recent));
     }
 }
 
@@ -275,14 +275,14 @@ function openSidebar() {
     sidebar.classList.remove('closed');
     sidebarOverlay.classList.add('active');
     document.body.style.overflow = 'hidden';
-    if (typeof OXYPersistence !== 'undefined') OXYPersistence.setItem('oxy_sidebar_open', true);
+    if (typeof souilXPersistence !== 'undefined') souilXPersistence.setItem('souilx_sidebar_open', true);
 }
 function closeSidebar() {
     sidebar.classList.remove('open');
     sidebar.classList.add('closed');
     sidebarOverlay.classList.remove('active');
     document.body.style.overflow = '';
-    if (typeof OXYPersistence !== 'undefined') OXYPersistence.setItem('oxy_sidebar_open', false);
+    if (typeof souilXPersistence !== 'undefined') souilXPersistence.setItem('souilx_sidebar_open', false);
 }
 function isSidebarOpen() {
     return sidebar.classList.contains('open');
@@ -1012,7 +1012,7 @@ if ('serviceWorker' in navigator) {
 }
 
 (function checkBackendHealth() {
-    const bannerId = 'oxy-backend-banner';
+    const bannerId = 'souilx-backend-banner';
     function showBanner(message) {
         if (document.getElementById(bannerId)) return;
         const banner = document.createElement('div'); banner.id = bannerId;
@@ -1023,7 +1023,7 @@ if ('serviceWorker' in navigator) {
 })();
 
 async function initApp() {
-    console.log('[App] Initializing OXY AI...');
+    console.log('[App] Initializing souilX...');
     const isAuthenticated = await checkAuth();
     if (!isAuthenticated) return;
     updateUserUI(); loadSessionsList(); initLocation();
