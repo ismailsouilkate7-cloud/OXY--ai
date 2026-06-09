@@ -574,12 +574,27 @@ body {
   z-index: 50;
   pointer-events: none;
   border: none;
+  border-top: none; /* Ensure no top border */
 }
-.input-area > * { pointer-events: auto; }
-
-/* No background scrim — the input area is fully transparent on every device
-   so the page content shows through. Only the pill itself is visible. */
-.input-area::before { content: none; }
+/* Gradient scrim at the top of the input area — fades from the page
+   background (at the bottom) up to transparent so messages scroll
+   under the composer with a smooth fade. NO top border / line. */
+.input-area::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 90px;
+  background: linear-gradient(
+    to top,
+    var(--bg-base) 0%,
+    var(--bg-base) 35%,
+    rgba(34, 34, 34, 0.85) 55%,
+    rgba(34, 34, 34, 0.45) 75%,
+    rgba(34, 34, 34, 0) 100%
+  );
+  pointer-events: none;
+  z-index: -1;
+}
 .input-area::after { content: none; }
 
 .input-controls { display: flex; justify-content: center; gap: 8px; margin-bottom: 8px; }
