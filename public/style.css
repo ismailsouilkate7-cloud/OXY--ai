@@ -571,10 +571,10 @@ body {
   padding: 0 16px max(12px, env(safe-area-inset-bottom));
   display: flex; flex-direction: column; align-items: center;
   background: transparent;
-  z-index: 50;
+  z-index: 1001;
   pointer-events: none;
   border: none;
-  border-top: none; /* Ensure no top border */
+  /* border-top: none; */ /* Remove or comment out this line if it exists */
 }
 /* Gradient scrim at the top of the input area — fades from the page
    background (at the bottom) up to transparent so messages scroll
@@ -597,7 +597,7 @@ body {
 }
 .input-area::after { content: none; }
 
-.input-controls { display: flex; justify-content: center; gap: 8px; margin-bottom: 8px; }
+.input-controls { display: flex; justify-content: center; gap: 8px; margin-bottom: 8px; pointer-events: auto; }
 .stop-btn, .regen-btn { all: unset; display: flex; align-items: center; gap: 8px; padding: 8px 18px; background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 100px; color: var(--text-secondary); font-size: 13px; font-weight: 500; cursor: pointer; transition: all 0.15s ease; min-height: 38px; backdrop-filter: blur(8px); }
 .stop-btn:hover { border-color: var(--error); color: var(--error); background: rgba(239, 68, 68, 0.06); }
 .regen-btn:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
@@ -621,6 +621,7 @@ body {
   transition: box-shadow 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
   position: relative;
   z-index: 2;
+  pointer-events: auto;
 }
 .input-wrapper:hover {
   border-color: rgba(255, 255, 255, 0.12);

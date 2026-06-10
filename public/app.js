@@ -338,7 +338,17 @@ fileInput.addEventListener('change', (e) => {
         sendBtn.disabled = true;
         msgInput.disabled = true;
         addFilesToPending(e.target.files);
-        uploadFiles(e.target.files).finally(() => { sendBtn.disabled = false; msgInput.disabled = false; });
+        // Safety timeout: re-enable input after 10 seconds even if upload hangs/stalls
+        const safetyTimer = setTimeout(() => {
+            sendBtn.disabled = false;
+            msgInput.disabled = false;
+            console.warn('[Safety] Re-enabled input after timeout (upload may have hung)');
+        }, 10000);
+        uploadFiles(e.target.files).finally(() => { 
+            clearTimeout(safetyTimer);
+            sendBtn.disabled = false; 
+            msgInput.disabled = false; 
+        });
         e.target.value = '';
     }
 });
@@ -678,7 +688,11 @@ function appendMessage(text, sender, finalRender = true, files = null) {
 
 function handleSend() {
     const text = messageInput.value.trim();
-    if ((!text && pendingFiles.length === 0) || isGenerating || isUploading) return;
+    console.log('[Input] handleSend called, text:', text ? `"${text.substring(0, 50)}..."` : '(empty)', 'files:', pendingFiles.length, 'generating:', isGenerating, 'uploading:', isUploading);
+    if ((!text && pendingFiles.length === 0) || isGenerating || isUploading) {
+        console.log('[Input] handleSend blocked — no text/files, or already generating/uploading');
+        return;
+    }
     messageInput.value = ''; messageInput.style.height = 'auto'; sendBtn.disabled = true;
     const filesForHistory = pendingFiles.map(f => { addRecentFile({ name: f.name, type: f.type, size: f.size }); return { name: f.name, type: f.type, size: f.size, preview: f.preview }; });
     currentChatHistory.push({ text: text, sender: 'user', files: filesForHistory });
@@ -938,7 +952,11 @@ async function sendMessage(text, inlineDataOrFiles = [], isRegenerate = false, p
             console.error('Chat error:', error);
         }
     } finally {
-        isGenerating = false; isProcessingFiles = false; stopBtn.style.display = 'none'; regenBtn.style.display = 'flex';
+        isGenerating = false; isProcessingFiles = false; 
+        // Ensure uploading state is always reset and send button re-enabled
+        setUploadingState(false);
+        updateSendButton();
+        stopBtn.style.display = 'none'; regenBtn.style.display = 'flex';
         if (fullResponse) { const widgetResult = OXYWidgetRenderer.detectAndRender(fullResponse); if (widgetResult) contentDiv.innerHTML = `<div class="oxy-widget-container">${widgetResult.html}</div>`; else { const rawHtml = marked.parse(fullResponse); contentDiv.innerHTML = DOMPurify.sanitize(rawHtml); formatCodeBlocks(contentDiv); } }
         chatContainer.scrollTop = chatContainer.scrollHeight;
     }
@@ -948,7 +966,10 @@ function stopGeneration() { if (abortController) { abortController.abort(); isGe
 stopBtn.addEventListener('click', stopGeneration);
 regenBtn.addEventListener('click', () => { if (currentChatHistory.length >= 2 && currentChatHistory[currentChatHistory.length - 1].sender === 'bot') { currentChatHistory.pop(); const lastUserMsg = currentChatHistory[currentChatHistory.length - 1]; renderHistory(); sendMessage(lastUserMsg.text, [], true); } });
 
-messageInput.addEventListener('input', function() { this.style.height = 'auto'; this.style.height = (this.scrollHeight) + 'px'; this.style.overflowY = this.scrollHeight > 150 ? 'auto' : 'hidden'; updateSendButton(); });
+messageInput.addEventListener('input', function() {
+    console.log('[Input] input event fired, value:', this.value ? `"${this.value.substring(0, 30)}..."` : '(empty)');
+    this.style.height = 'auto'; this.style.height = (this.scrollHeight) + 'px'; this.style.overflowY = this.scrollHeight > 150 ? 'auto' : 'hidden'; updateSendButton();
+});
 messageInput.addEventListener('keydown', function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!sendBtn.disabled && !isGenerating) handleSend(); } });
 sendBtn.addEventListener('click', handleSend);
 

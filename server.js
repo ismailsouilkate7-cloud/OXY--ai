@@ -124,6 +124,9 @@ const port = process.env.PORT || 3000;
 // Increase JSON body limit for base64 payloads
 app.use(express.json({ limit: '50mb' }));
 
+// Parse URL-encoded bodies (needed for some form submissions)
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+
 // Use gzip compression for responses
 app.use(compression());
 
@@ -177,11 +180,15 @@ try {
     console.error('[Uploads] Failed to create uploads directory:', err.message);
 }
 
-// CORS headers for Vercel deployment
+// ============================================================
+// CORS — required for Vercel production deployment
+// Handles preflight OPTIONS requests for all API routes
+// ============================================================
 app.use((req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Session-Id');
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
     if (req.method === 'OPTIONS') return res.sendStatus(204);
     next();
 });
@@ -1235,23 +1242,30 @@ function detectAmbiguity(message) {
 // ENVIRONMENT VALIDATION
 // ============================================================
 
+// ============================================================
+// API KEY LOADING — reads from process.env (set in Vercel dashboard)
+// Variable names must match EXACTLY what is set in Vercel:
+//   GEMINI_API_KEY, GEMINI_API_KEY_2, GEMINI_API_KEY_3,
+//   GEMINI_API_KEY_4, GEMINI_API_KEY_5
+// NOTE: There is no GEMINI_API_KEY_1 — the primary key is GEMINI_API_KEY
+// ============================================================
 const API_KEYS = [
     process.env.GEMINI_API_KEY,
-    process.env.GEMINI_API_KEY_1,
     process.env.GEMINI_API_KEY_2,
     process.env.GEMINI_API_KEY_3,
     process.env.GEMINI_API_KEY_4,
     process.env.GEMINI_API_KEY_5,
-].filter(key => key && key.trim() !== '');
+].filter(key => key && key.trim() !== '' && key !== 'your_gemini_api_key_here');
 
 if (API_KEYS.length === 0) {
-    console.error('[API Keys] ❌ No API keys configured! Set GEMINI_API_KEY in .env');
+    console.error('[API Keys] ❌ No API keys configured! Set GEMINI_API_KEY in Vercel environment variables.');
 }
 
 function validateEnv(req, res, next) {
     if (req.path.startsWith('/api/chat') && API_KEYS.length === 0) {
         console.error('[Env] ❌ /api/chat called but no API keys configured');
-        return res.status(500).json({ error: 'Server configuration error: missing API key. Contact the administrator.' });
+        // Return a clear, debuggable error instead of crashing
+        return res.status(500).json({ error: 'No API key configured. Please set GEMINI_API_KEY in your Vercel environment variables.' });
     }
     next();
 }
@@ -1266,7 +1280,7 @@ function getAIClient(keyIndex) {
 
 const SYSTEM_PROMPT = `You are SouilX created by Ismail Souilkate.
 kfch khasek tkon :
--friendly, katkheser lhedra.
+-friendly, katkheser lhedra ila kheserha m3ak luser.
    -katjaweb 3la ay su2al kifma kan.
    -katjaweb baylogha hder m3ak biha luser, (ila hder maak luser blogha akhra men ghir darija jawbo blogha dialo machi bdarija, ila hder bdarija hder maah 3adi bdarija).
    -fach yehder maak bdarija dekhel maaha chiwa dial fr mat3ie9ch.
