@@ -107,24 +107,44 @@ app.post('/api/chat', optionalUserAuth, upload.array('files', 10), async (req, r
             else trackUserActivity(sessionId, 'message');
         }
 
-        const ambiguityResult = detectAmbiguity(message);
-        if (ambiguityResult.isAmbiguous && ambiguityResult.clarifications.length > 0) {
-            return res.json({ text: ambiguityResult.clarifications[0], metadata: { type: 'clarification', ambiguity: ambiguityResult } });
-        }
-
         const intent = detectIntent(message);
         storeInMemory(sessionId, 'lastIntent', intent);
         storeInMemory(sessionId, 'lastMessage', message.substring(0, 100));
 
         console.log(\`[Chat] session=\${sessionId} files=\${files.length} model=\${model}\`);
 
+        // Web search runs BEFORE ambiguity check so time-sensitive queries
+        // (e.g. "latest news", "what happened today") trigger search instead of
+        // being blocked by the ambiguity detector asking "which time period?"
         let searchResults = null;
+        let searchPerformed = false;
         const searchQuery = detectWebSearchIntent(message);
         if (searchQuery) {
-            console.log(\`[Web Search] Searching for "\${searchQuery}"\`);
+            console.log(\`[Web Search] ✅ Intent detected | User query: "\${message}" | Search query: "\${searchQuery}"\`);
             searchResults = await performWebSearch(searchQuery);
             if (searchResults && searchResults.length > 0) {
+                searchPerformed = true;
+                console.log(\`[Web Search] ✅ Success | \${searchResults.length} result(s) returned for: "\${searchQuery}"\`);
+                console.log(\`[Web Search] Results:\`, JSON.stringify(searchResults.map(r => ({ title: r.title, url: r.url })), null, 2));
                 message = message + formatSearchResultsForAI(searchResults);
+            } else {
+                console.log(\`[Web Search] ⚠️ No results returned for: "\${searchQuery}"\`);
+            }
+        } else {
+            console.log(\`[Web Search] ℹ️ No web search intent for: "\${message}"\`);
+        }
+
+        // Only check ambiguity when web search did NOT provide current information
+        if (!searchPerformed) {
+            const ambiguityResult = detectAmbiguity(message);
+            if (ambiguityResult.isAmbiguous && ambiguityResult.clarifications.length > 0) {
+                // For queries that ARE time-sensitive but ambiguity still fires (e.g. search returned 0 results),
+                // don't block — let the model answer with what it knows
+                const isTimeSensitive = /\b(latest|recent|current|today|now|this\s+week|trending|breaking|news|updates?|happened|happening)\b/i.test(message);
+                if (!isTimeSensitive) {
+                    return res.json({ text: ambiguityResult.clarifications[0], metadata: { type: 'clarification', ambiguity: ambiguityResult } });
+                }
+                console.log(\`[Web Search] ⚠️ Ambiguity detected but query is time-sensitive — proceeding without clarification\`);
             }
         }
 
