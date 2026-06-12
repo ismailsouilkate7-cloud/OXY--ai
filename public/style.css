@@ -520,6 +520,16 @@ body {
 }
 .action-btn:hover { color: var(--text-primary); background: var(--bg-hover); }
 
+/* Header New Chat Button — Sleek minimalist paperclip */
+#header-new-chat-btn svg {
+  display: block;
+  transform-origin: center;
+  transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1);
+}
+#header-new-chat-btn:hover svg {
+  transform: scale(1.18);
+}
+
 /* Chat Container — MUST have bottom padding for input area */
 .chat-container {
   flex: 1; overflow-y: auto;

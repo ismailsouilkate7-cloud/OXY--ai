@@ -275,7 +275,7 @@
             btn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> Signing in...';
             errorEl.classList.remove('visible');
             try {
-                const res = await fetch('/login', {
+                const res = await fetch('/api/auth/login', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
