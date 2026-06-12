@@ -9,17 +9,27 @@ import mime from 'mime-types';
 import { v4 as uuidv4 } from 'uuid';
 import compression from 'compression';
 import fs from 'fs';
-import DDG from 'duck-duck-scrape';
+
 import cookieParser from 'cookie-parser';
 import crypto from 'crypto';
 import jwt from 'jsonwebtoken';
-import pool, { initDb } from './db.js';
+import pool, { initDb, isDatabaseReady, getDbDiagnostics } from './db.js';
 import bcrypt from 'bcrypt';
 
 dotenv.config();
 
-// Initialize database
-initDb();
+// Verify Tavily API Key
+if (process.env.TAVILY_API_KEY) {
+    console.log('[Tavily] API Key Loaded');
+} else {
+    console.log('[Tavily] API Key Missing');
+}
+
+// Initialize database (with startup diagnostics + fallback)
+initDb().then(() => {
+    console.log('[Startup] ✅ Server fully initialized');
+    console.log('[Startup] 🌐 Listening on port ' + (process.env.PORT || 3000));
+});
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -78,13 +88,21 @@ function safeSseEnd(res) {
 // and show a friendly message instead of a console-only error.
 // ============================================================
 app.get('/api/health', (req, res) => {
+    const db = getDbDiagnostics();
     res.json({
         status: 'ok',
         uptime: process.uptime(),
         timestamp: Date.now(),
         port: process.env.PORT || 3000,
-        keysLoaded: API_KEYS.length,
+        keysLoaded: API_KEYS ? API_KEYS.length : 0,
         nodeVersion: process.version,
+        database: {
+            ready: isDatabaseReady(),
+            status: db.status,
+            hostname: db.hostname,
+            hostnameResolves: db.hostnameResolves,
+            dnsError: db.dnsError,
+        },
     });
 });
 
@@ -272,9 +290,9 @@ app.post('/api/auth/register', async (req, res) => {
     }
     
     // Warn if DB is not connected
-    if (!process.env.DATABASE_URL || process.env.DATABASE_URL.includes('username:password')) {
-        console.error('[Auth] Register blocked: DATABASE_URL not configured');
-        return res.status(503).json({ error: 'Database is not configured. Please set a valid DATABASE_URL.' });
+    if (!isDatabaseReady()) {
+        console.error('[Auth] Register blocked: database not available');
+        return res.status(503).json({ error: 'Database is not connected. Chat works offline, but registration requires the database.' });
     }
 
     try {
@@ -321,9 +339,9 @@ app.post('/api/auth/login', async (req, res) => {
         return res.status(400).json({ error: 'Email and password are required' });
     }
 
-    if (!process.env.DATABASE_URL || process.env.DATABASE_URL.includes('username:password')) {
-        console.error('[Auth] Login blocked: DATABASE_URL not configured');
-        return res.status(503).json({ error: 'Database is not configured. Please set a valid DATABASE_URL.' });
+    if (!isDatabaseReady()) {
+        console.error('[Auth] Login blocked: database not available');
+        return res.status(503).json({ error: 'Database is not connected. Chat works offline, but login requires the database.' });
     }
 
     try {
@@ -1507,11 +1525,17 @@ class GeminiKeyManager {
 
     recoverKeys() {
         const now = Date.now();
+        let recovered = 0;
         for (const k of this.keys) {
             if (k.status !== 'active' && k.cooldown_until < now) {
                 k.status = 'active';
                 k.failure_count = 0;
+                recovered++;
             }
+        }
+        if (recovered > 0) {
+            console.log(`[KeyManager] ♻️ Recovered ${recovered} key(s) from cooldown`);
+            this.logStatus();
         }
     }
 
@@ -1550,42 +1574,69 @@ class GeminiKeyManager {
         const keyInfo = this.keys[index];
         if (!keyInfo) return;
 
-        const status = err.status;
-        const msg = err.message || '';
+        const status = err.status || err?.response?.status;
+        const msg = (err.message || '') + ' ' + (err?.response?.data?.error?.message || '');
         const now = Date.now();
 
-        const isRateLimit = status === 429 || msg.includes('429') || 
-                            msg.includes('QUOTA_EXCEEDED') || 
-                            msg.includes('RESOURCE_EXHAUSTED') || 
-                            msg.includes('rate_limit_exceeded') || 
-                            msg.includes('RATE_LIMIT_EXCEEDED');
+        // Must stay in sync with isRateLimitError() below
+        const isRateLimit = status === 429 || status === 503 ||
+                            /429|QUOTA_EXCEEDED|RESOURCE_EXHAUSTED|rate[_\s-]?limit|RATE_LIMIT/i.test(msg);
 
         if (isRateLimit) {
             keyInfo.status = "rate_limited";
-            // Random cooldown between 60s and 120s
             const cooldownSecs = Math.floor(Math.random() * 61) + 60;
             keyInfo.cooldown_until = now + (cooldownSecs * 1000);
-            console.warn(`[KeyManager] ⚠️ Key[${index + 1}] rate limited. Cooldown: ${cooldownSecs}s. Reason: 429_QUOTA`);
+            const reason = status === 503 ? '503_SERVICE_UNAVAILABLE' : '429_QUOTA';
+            console.warn(`[KeyManager] ⚠️ Key[${index + 1}] rate-limited → cooldown ${cooldownSecs}s. Reason: ${reason}`);
+        } else if (status >= 500) {
+            // 5xx server errors — short cooldown so other keys are preferred
+            keyInfo.status = "cooldown";
+            const cooldownSecs = 30;
+            keyInfo.cooldown_until = now + (cooldownSecs * 1000);
+            console.warn(`[KeyManager] ⚠️ Key[${index + 1}] server error HTTP ${status} → cooldown ${cooldownSecs}s`);
         } else {
             keyInfo.failure_count++;
-            console.warn(`[KeyManager] ⚠️ Key[${index + 1}] failed (Count: ${keyInfo.failure_count}). Error: ${msg.substring(0, 100)}`);
+            console.warn(`[KeyManager] ⚠️ Key[${index + 1}] failed (count: ${keyInfo.failure_count}). Error: ${msg.substring(0, 120)}`);
             if (keyInfo.failure_count >= 3) {
                 keyInfo.status = "cooldown";
-                keyInfo.cooldown_until = now + 30000; // 30s cooldown
-                console.warn(`[KeyManager] ❌ Key[${index + 1}] reached 3 failures. Cooldown: 30s.`);
+                const cooldownSecs = 60;
+                keyInfo.cooldown_until = now + (cooldownSecs * 1000);
+                console.warn(`[KeyManager] ❌ Key[${index + 1}] disabled after 3 failures → cooldown ${cooldownSecs}s`);
             }
         }
     }
 
     reportSuccess(index) {
         const keyInfo = this.keys[index];
-        if (keyInfo && keyInfo.failure_count > 0) {
-            keyInfo.failure_count = 0;
+        if (!keyInfo) return;
+        const wasUnavailable = keyInfo.status !== 'active';
+        keyInfo.status = 'active';
+        keyInfo.failure_count = 0;
+        keyInfo.cooldown_until = 0;
+        if (wasUnavailable) {
+            console.log(`[KeyManager] ✅ Key[${index + 1}] restored to active after success`);
+        }
+    }
+
+    logStatus() {
+        const now = Date.now();
+        for (let i = 0; i < this.keys.length; i++) {
+            const k = this.keys[i];
+            const expiresIn = k.cooldown_until > now ? Math.ceil((k.cooldown_until - now) / 1000) : 0;
+            const statusIcon = k.status === 'active' ? '✅' : k.status === 'rate_limited' ? '⏳' : '❌';
+            const expiry = expiresIn > 0 ? ` (${expiresIn}s remaining)` : '';
+            console.log(`  ${statusIcon} Key[${i + 1}] status=${k.status} failures=${k.failure_count}${expiry}`);
         }
     }
 }
 
 const keyManager = new GeminiKeyManager(API_KEYS);
+
+// Periodic key status snapshot (every 60s)
+setInterval(() => {
+    const hasInactive = keyManager.keys.some(k => k.status !== 'active');
+    if (hasInactive) keyManager.logStatus();
+}, 60000);
 
 // ============================================================
 // RATE-LIMIT DETECTION HELPERS
@@ -1699,7 +1750,7 @@ async function executeWithRetry(params, isStream = true, opts = {}) {
         }
 
         // 2. Try the request with this key
-        console.log(`[AI] 🚀 Attempt ${attempt + 1}/${maxRetries} | Key[${keyIndex + 1}]/${API_KEYS.length} | Model=${params.model} | Stream=${isStream}`);
+        console.log(`[AI] 🚀 Attempt ${attempt + 1}/${maxRetries} | Key[${keyIndex + 1}]/${API_KEYS.length} | status=${selectedKey.status} | Model=${params.model} | Stream=${isStream}`);
         try {
             const client = new GoogleGenAI({ apiKey: selectedKey.key });
             
@@ -1751,42 +1802,42 @@ async function executeWithRetry(params, isStream = true, opts = {}) {
                 : await client.models.generateContent(reqData);
 
             keyManager.reportSuccess(keyIndex);
-            if (attempt > 0) {
-                console.log(`[AI] ✅ Recovered after ${attempt + 1} attempts using Key[${keyIndex + 1}]`);
-            } else {
-                console.log(`[AI] ✅ Key[${keyIndex + 1}] succeeded with model ${params.model}`);
-            }
+            console.log(`[AI] ✅ Key[${keyIndex + 1}] succeeded | attempt=${attempt + 1}/${maxRetries} | model=${params.model}`);
             return { stream, model: params.model, keyIndex, attempts: attempt + 1 };
         } catch (err) {
             if (isRateLimitError(err)) {
                 keyManager.reportError(keyIndex, err);
                 const remaining = keyManager.keys.filter(k => k.status === 'active' || k.cooldown_until <= Date.now()).length;
-                console.warn(`[AI] 🔄 Key[${keyIndex + 1}] rate-limited (HTTP ${err.status || 429}). Switching to next key… (attempt ${attempt + 1}, ${remaining} keys still active)`);
-                continue; // no backoff between keys — keep moving
+                console.warn(`[AI] 🔄 Key[${keyIndex + 1}] rate-limited → failover. Active: ${remaining}/${API_KEYS.length} keys remain (attempt ${attempt + 1})`);
+                continue; // immediately try next key, no backoff between keys
             }
             if (isTransientError(err)) {
                 keyManager.reportError(keyIndex, err);
                 const backoffMs = Math.min(2000, 250 * Math.pow(2, attempt));
-                console.warn(`[AI] ⚠️ Transient error on Key[${keyIndex + 1}]: ${(err.message || '').substring(0, 100)}. Retrying in ${backoffMs}ms…`);
+                const remaining = keyManager.keys.filter(k => k.status === 'active' || k.cooldown_until <= Date.now()).length;
+                console.warn(`[AI] ⚠️ Key[${keyIndex + 1}] transient error (HTTP ${err.status || '?'}) → backoff ${backoffMs}ms. Active keys: ${remaining}/${API_KEYS.length} (attempt ${attempt + 1})`);
                 await new Promise(r => setTimeout(r, backoffMs));
                 continue;
             }
-            // Non-retryable error — log detailed error info
-            console.error(`[AI] ❌ Non-retryable error on Key[${keyIndex + 1}] (HTTP ${err.status || '?'})`);
+            // Non-retryable error — log detailed error info then throw
+            console.error(`[AI] ❌ Non-retryable error on Key[${keyIndex + 1}] (HTTP ${err.status || '?'}) — will NOT retry`);
             console.error(`  Message: ${err.message}`);
-            console.error(`  Status: ${err.status}`);
             if (err.response?.data?.error) {
-                console.error(`  API Error: ${JSON.stringify(err.response.data.error, null, 2)}`);
+                console.error(`  API Error: ${JSON.stringify(err.response.data.error, null, 2).substring(0, 300)}`);
             }
             if (err.error) {
-                console.error(`  Error Details: ${JSON.stringify(err.error, null, 2)}`);
+                console.error(`  Error Details: ${JSON.stringify(err.error, null, 2).substring(0, 300)}`);
             }
             keyManager.reportError(keyIndex, err);
+            // Print key statuses for diagnostics
+            keyManager.logStatus();
             throw err;
         }
     }
 
-    const ex = new Error('Max retries exceeded');
+    console.error(`[AI] ❌ FAILED after ${maxRetries} attempts — all keys exhausted or permanently failing`);
+    keyManager.logStatus();
+    const ex = new Error('All API keys exhausted after retries');
     ex.allKeysExhausted = true;
     ex.attempts = maxRetries;
     throw ex;
@@ -1953,7 +2004,7 @@ function detectWebSearchIntent(message) {
     // === HARD SEARCH RULE ===
     // If ANY of these time-sensitive terms appear, the system MUST search the web
     // regardless of other patterns (category B no longer blocks time-sensitive queries)
-    const mustSearchTerms = /\b(news|breaking|headlines?|latest|recent|current|today|tonight|this\s+week|trending|updates?|announcements?|happened|happening|live|now|scores?|results?|weather|forecast|stock|bitcoin|crypto|biggest|developments?)\b/i;
+    const mustSearchTerms = /\b(news|breaking|headlines?|latest|recent|current|today|tonight|this\s+week|this\s+month|this\s+year|trending|updates?|announcements?|happened|happening|live|now|scores?|results?|weather|forecast|stock|bitcoin|crypto|biggest|developments?|price|pricing|cost|released|launched|unveiled|2025|2026|new\s+version|compared?\s+to|vs\.?|versus|better\s+than|which\s+is\s+(?:better|best|faster))\b/i;
     
     // Category B patterns — only block queries with NO time-sensitive terms
     const categoryBOnly = /\b(explain|define|describe|concept|theory|tutorial|guide|how\s+to\s+(?:code|program|make|build|install)|write\s+(?:a\s+)?(?:function|code|program|essay|story)|solve|calculate|translate|recipe|proofread|edit)\b/i;
@@ -1971,6 +2022,17 @@ function detectWebSearchIntent(message) {
     const aiNewsOverride = /\bai\b.*\b(news|latest|this\s+week|biggest|updates|today|recent|break)/i;
     if (aiNewsOverride.test(msg)) {
         console.log(`[WEB] intent detected | AI+News override triggered | Query: "${msg}"`);
+        return msg;
+    }
+    
+    // === HARD OVERRIDE: MODEL VERSIONS ===
+    const freshnessTerms = /\b(latest|newest|current|akhir|a5er|nouveau|dernier)\b/i;
+    const modelTerms = /\b(model|modèle|version|claude|anthropic|openai|chatgpt|gpt|gemini|google ai|grok|xai|deepseek|ai)\b/i;
+    
+    if (freshnessTerms.test(msg) && modelTerms.test(msg)) {
+        console.log('[Forced Model Search Triggered]');
+        console.log('[Searching Latest Model Information]');
+        console.log(`[WEB] intent detected | Model version override triggered | Query: "${msg}"`);
         return msg;
     }
     
@@ -1993,47 +2055,149 @@ function detectWebSearchIntent(message) {
     return null;
 }
 
-async function performWebSearch(query, retries = 2) {
+// === FALLBACK: shouldForceWebSearch ===
+// Catches queries that slip past detectWebSearchIntent but still need live data.
+// Uses a confidence-scoring approach: if enough "uncertainty signals" are present,
+// force a web search even when no hard keyword matched.
+function shouldForceWebSearch(message) {
+    if (!message || typeof message !== 'string') return { force: false, reason: null };
+    const msg = message.toLowerCase().trim();
+
+    // Skip very short messages (greetings, single words)
+    if (msg.length < 12) return { force: false, reason: 'too_short' };
+
+    // Skip creative / conversational requests
+    const creativeBlock = /\b(write|compose|create|imagine|story|poem|joke|song|essay|summarize|paraphrase|rewrite|translate|proofread|edit|code|function|script|program|hello|hi|hey|thanks|thank you|goodbye|bye)\b/i;
+    if (creativeBlock.test(msg)) return { force: false, reason: 'creative_request' };
+
+    let score = 0;
+    const signals = [];
+
+    // Signal 1: Question words asking about facts
+    if (/^(what|who|when|where|which|how\s+much|how\s+many|is\s+there|are\s+there|did|does|has|have|will)\b/i.test(msg)) {
+        score += 2;
+        signals.push('question_word');
+    }
+
+    // Signal 2: Mentions a specific company, product, or technology
+    if (/\b(claude|anthropic|openai|chatgpt|gpt|gemini|google|grok|xai|deepseek|meta|llama|mistral|microsoft|copilot|apple|tesla|nvidia|samsung|iphone|android|spacex|nasa)\b/i.test(msg)) {
+        score += 3;
+        signals.push('entity_mention');
+    }
+
+    // Signal 3: Mentions a year or date
+    if (/\b(20[2-3]\d|january|february|march|april|may|june|july|august|september|october|november|december)\b/i.test(msg)) {
+        score += 3;
+        signals.push('date_reference');
+    }
+
+    // Signal 4: Comparison or ranking questions
+    if (/\b(best|top|ranking|rank|compare|comparison|vs|versus|better|worse|fastest|cheapest|most\s+popular)\b/i.test(msg)) {
+        score += 2;
+        signals.push('comparison');
+    }
+
+    // Signal 5: Price / availability / status
+    if (/\b(price|pricing|cost|available|availability|released?|launch|status|deadline|schedule|roadmap)\b/i.test(msg)) {
+        score += 3;
+        signals.push('price_status');
+    }
+
+    // Signal 6: "How to" + product (likely needs current docs)
+    if (/\b(how\s+to\s+use|how\s+to\s+get|how\s+to\s+install|how\s+to\s+set\s*up|how\s+to\s+access)\b/i.test(msg)) {
+        score += 1;
+        signals.push('how_to_product');
+    }
+
+    // Threshold: if score >= 4, force web search
+    const shouldForce = score >= 4;
+    if (shouldForce) {
+        console.log(`[Fallback Search] Score: ${score}/10 | Signals: ${signals.join(', ')} | FORCING WEB SEARCH`);
+    }
+    return { force: shouldForce, reason: shouldForce ? signals.join('+') : null, score };
+}
+
+async function performWebSearch(query) {
     if (!query) {
-        console.warn('[Web Search] ⚠️ performWebSearch called with empty query');
         return null;
     }
-    console.log(`[Web Search] 🔍 Provider request | Query: "${query}" | Max retries: ${retries} | Results per page: 5`);
-    let lastError = null;
-    for (let attempt = 1; attempt <= retries; attempt++) {
-        try {
-            const startTime = Date.now();
-            const timeoutMs = 15000;
-            const results = await Promise.race([
-                DDG.search(query, { resultsPerPage: 5 }),
-                new Promise((_, reject) => setTimeout(() => reject(new Error(`Timeout after ${timeoutMs}ms`)), timeoutMs))
-            ]);
-            const elapsed = Date.now() - startTime;
-            if (!results || results.length === 0) {
-                console.log(`[Web Search] ⚠️ Attempt ${attempt}/${retries} | 0 results | ${elapsed}ms`);
-                return null;
-            }
-            const filtered = results.map(r => ({ title: r.title || '', url: r.url || '', description: r.description || '' })).filter(r => r.title && r.url);
-            console.log(`[Web Search] ✅ Attempt ${attempt}/${retries} | ${filtered.length} result(s) | ${elapsed}ms | Query: "${query}"`);
-            return filtered;
-        } catch (err) {
-            lastError = err;
-            console.error(`[Web Search] ❌ Attempt ${attempt}/${retries} failed | Error: ${err.message?.substring(0, 200)} | Query: "${query}"`);
-            if (attempt < retries) {
-                const delay = 500 * attempt;
-                console.log(`[Web Search] ⏳ Retrying in ${delay}ms (attempt ${attempt + 1}/${retries})...`);
-                await new Promise(resolve => setTimeout(resolve, delay));
-            }
-        }
+    
+    console.log('[Tavily] Searching: ' + query);
+    
+    if (!process.env.TAVILY_API_KEY) {
+        console.error('[Tavily] Error: Missing TAVILY_API_KEY in environment');
+        return null;
     }
-    console.error(`[Web Search] ❌ All ${retries} attempts exhausted | Last error: ${lastError?.message?.substring(0, 200)} | Query: "${query}"`);
-    return null;
+
+    try {
+        const timeoutMs = 15000;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+        const response = await fetch('https://api.tavily.com/search', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                api_key: process.env.TAVILY_API_KEY,
+                query: query,
+                search_depth: "advanced",
+                max_results: 5,
+                include_answer: true,
+                include_raw_content: false
+            }),
+            signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+            throw new Error('Tavily API returned status: ' + response.status);
+        }
+
+        const data = await response.json();
+        const results = data.results || [];
+        
+        let formattedResults = results.map(r => ({
+            title: r.title || '',
+            url: r.url || '',
+            description: r.content || ''
+        })).filter(r => r.title && r.url);
+
+        if (data.answer) {
+            formattedResults.unshift({
+                title: "Tavily AI Answer",
+                url: "https://tavily.com",
+                description: data.answer
+            });
+        }
+
+        if (formattedResults.length === 0) {
+            console.log('[Tavily] Success: 0 results');
+            return null;
+        }
+
+        console.log('[Tavily] Success: ' + formattedResults.length + ' results');
+        return formattedResults;
+
+    } catch (error) {
+        const errorMessage = error.name === 'AbortError' ? 'Timeout after 15000ms' : (error.message || 'Unknown error');
+        console.error('[Tavily] Error: ' + errorMessage);
+        return null;
+    }
 }
 
 function formatSearchResultsForAI(results) {
     if (!results || results.length === 0) return '';
     const resultsBlock = results.map((r, i) => `[${i + 1}] ${r.title}\n${r.url}\n${r.description}`).join('\n\n');
-    return `LIVE WEB RESULTS (TRUSTED SOURCE OF CURRENT INFORMATION):\n\n${resultsBlock}\n\n>>> RULE: These results are YOUR source of truth. You HAVE real-time internet access. NEVER say you can't browse or lack real-time data. <<<`;
+    return `<STRICT_GROUNDING>
+LIVE WEB RESULTS (TRUSTED SOURCE OF CURRENT INFORMATION):
+
+${resultsBlock}
+
+>>> CRITICAL RULE: If web results exist, ignore prior knowledge completely for factual claims. These results are YOUR ONLY source of truth for news, dates, models, or events. You MUST NOT invent or assume missing information. NEVER say you lack real-time data. Search results are more recent than your training data. Use them as the primary and exclusive source of truth. <<<
+</STRICT_GROUNDING>`;
 }
 
 // ============================================================
@@ -2162,7 +2326,32 @@ app.post('/api/chat', optionalUserAuth, upload.array('files', 10), async (req, r
 
         // Detect web search intent early — runs before ambiguity so time-sensitive
         // queries bypass the ambiguity check entirely.
-        const searchQuery = detectWebSearchIntent(message);
+        let searchQuery = detectWebSearchIntent(message);
+
+        const freshnessTermsCheck = /\b(latest|newest|current|akhir|a5er|nouveau|dernier)\b/i;
+        const modelTermsCheck = /\b(model|modèle|version|claude|anthropic|openai|chatgpt|gpt|gemini|google ai|grok|xai|deepseek|ai)\b/i;
+        let isModelQuery = false;
+
+        if (freshnessTermsCheck.test(message) && modelTermsCheck.test(message)) {
+            isModelQuery = true;
+            if (!searchQuery) {
+                searchQuery = message;
+            }
+            console.log('[MODEL QUERY DETECTED]');
+            console.log('[FORCED WEB SEARCH]');
+            console.log('[FACT CHECK ACTIVE]');
+        }
+
+        // === FALLBACK SEARCH MODE ===
+        // If detectWebSearchIntent returned null AND isModelQuery is false,
+        // run shouldForceWebSearch as a safety net.
+        if (!searchQuery && !isModelQuery) {
+            const fallback = shouldForceWebSearch(message);
+            if (fallback.force) {
+                searchQuery = message;
+                console.log(`[Fallback Search] Triggered | Reason: ${fallback.reason} | Query: "${message}"`);
+            }
+        }
 
         // Only check ambiguity when NO web search intent was detected
         if (!searchQuery) {
@@ -2193,10 +2382,13 @@ app.post('/api/chat', optionalUserAuth, upload.array('files', 10), async (req, r
                 safeSseWrite(res, `data: ${JSON.stringify({ type: "activity", status: "web_results_found", count: searchResults.length })}\n\n`);
                 console.log(`[WEB UI] results received | count: ${searchResults.length}`);
                 console.log(`[WEB UI] event sent to client | type: web_results_found`);
+                console.log('[Search Results Injected]');
+                console.log('[Using Fresh Search Context]');
+                console.log('[Search Override Active]');
             } else {
                 safeSseWrite(res, `data: ${JSON.stringify({ type: "activity", status: "web_no_results" })}\n\n`);
                 console.log(`[WEB UI] no results received | event sent to client`);
-                searchContext = `[FALLBACK] No strong live updates found for "${searchQuery}", but here's the general context.`;
+                searchContext = `<STRICT_GROUNDING>\n[FALLBACK] No reliable live data found for "${searchQuery}".\n>>> CRITICAL RULE: You MUST clearly tell the user "no reliable live data found". Do NOT invent or assume any missing factual information. <<<\n</STRICT_GROUNDING>`;
             }
         } else {
             console.log(`[WEB] intent detected: no — query does not contain time-sensitive terms`);
@@ -2204,29 +2396,37 @@ app.post('/api/chat', optionalUserAuth, upload.array('files', 10), async (req, r
 
         let dbHistory = [];
         if (req.user) {
-            let convoResult = await pool.query('SELECT * FROM conversations WHERE id = $1 AND user_id = $2', [sessionId, req.user.userId]);
-            if (convoResult.rows.length === 0) {
-                const title = (req.body.message || '').substring(0, 30) || 'New Chat';
-                await pool.query('INSERT INTO conversations (id, user_id, title) VALUES ($1, $2, $3)', [sessionId, req.user.userId, title]);
-            } else {
-                await pool.query('UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = $1', [sessionId]);
-                const msgResult = await pool.query('SELECT role, content FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC', [sessionId]);
-                dbHistory = msgResult.rows.map(m => {
-                    const text = m.content || '';
-                    const parts = [];
-                    let cleanText = text;
-                    const pdfUriRegex = /\[PDF_URI:(.*?)\]/g;
-                    let match;
-                    while ((match = pdfUriRegex.exec(text)) !== null) {
-                        parts.push({ fileData: { mimeType: 'application/pdf', fileUri: match[1] } });
-                        cleanText = cleanText.replace(match[0], '');
+            try {
+                if (!isDatabaseReady()) {
+                    console.log('[Chat] ⚠️ Database unavailable — skipping DB history fetch, using in-memory fallback');
+                } else {
+                    let convoResult = await pool.query('SELECT * FROM conversations WHERE id = $1 AND user_id = $2', [sessionId, req.user.userId]);
+                    if (convoResult.rows.length === 0) {
+                        const title = (req.body.message || '').substring(0, 30) || 'New Chat';
+                        await pool.query('INSERT INTO conversations (id, user_id, title) VALUES ($1, $2, $3)', [sessionId, req.user.userId, title]);
+                    } else {
+                        await pool.query('UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = $1', [sessionId]);
+                        const msgResult = await pool.query('SELECT role, content FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC', [sessionId]);
+                        dbHistory = msgResult.rows.map(m => {
+                            const text = m.content || '';
+                            const parts = [];
+                            let cleanText = text;
+                            const pdfUriRegex = /\[PDF_URI:(.*?)\]/g;
+                            let match;
+                            while ((match = pdfUriRegex.exec(text)) !== null) {
+                                parts.push({ fileData: { mimeType: 'application/pdf', fileUri: match[1] } });
+                                cleanText = cleanText.replace(match[0], '');
+                            }
+                            cleanText = cleanText.trim();
+                            if (cleanText) {
+                                parts.push({ text: cleanText });
+                            }
+                            return { role: m.role, parts: parts.length > 0 ? parts : [{ text: '' }] };
+                        });
                     }
-                    cleanText = cleanText.trim();
-                    if (cleanText) {
-                        parts.push({ text: cleanText });
-                    }
-                    return { role: m.role, parts: parts.length > 0 ? parts : [{ text: '' }] };
-                });
+                }
+            } catch (dbErr) {
+                console.error(`[Chat] ⚠️ DB history fetch failed (${dbErr.message?.substring(0, 100)}) — falling back to in-memory`);
             }
         }
 
@@ -2243,7 +2443,11 @@ app.post('/api/chat', optionalUserAuth, upload.array('files', 10), async (req, r
         if (searchContext) {
             console.log(`[WEB] injected into prompt | ${searchContext.length} chars in system instruction`);
         }
-        const currentSystemPrompt = `${SYSTEM_PROMPT}${dateContext}\n\nThe user is named "${userName || 'User'}".${locationContext}${genderContext}${searchSystemContext}`;
+        let currentSystemPrompt = `${SYSTEM_PROMPT}${dateContext}\n\nThe user is named "${userName || 'User'}".${locationContext}${genderContext}${searchSystemContext}`;
+        
+        if (isModelQuery) {
+            currentSystemPrompt += `\n\n>>> CRITICAL FIX RULES: NEVER answer model/version questions (like "latest Claude", "newest GPT") from memory. NEVER invent release dates (especially future dates like 2026). If a model name + year is requested, verify via web search results first. If generated date > ${currentYear}, it is INVALID. Web search results ALWAYS override training knowledge. <<<`;
+        }
 
         let historyToUse = [];
         if (req.user) {
@@ -2400,7 +2604,11 @@ app.post('/api/chat', optionalUserAuth, upload.array('files', 10), async (req, r
                     
                     if (!dbInserted) {
                         if (req.user) {
-                            await pool.query('INSERT INTO messages (conversation_id, role, content) VALUES ($1, $2, $3)', [sessionId, 'user', historyText]);
+                            try {
+                                await pool.query('INSERT INTO messages (conversation_id, role, content) VALUES ($1, $2, $3)', [sessionId, 'user', historyText]);
+                            } catch (dbErr) {
+                                console.warn(`[Chat] ⚠️ DB insert (user msg) failed: ${dbErr.message?.substring(0, 100)} — continuing without persistence`);
+                            }
                         }
                         historyToUse.push({ role: "user", parts: [{ text: historyText }] });
                         dbInserted = true;
@@ -2434,7 +2642,11 @@ app.post('/api/chat', optionalUserAuth, upload.array('files', 10), async (req, r
         }
 
         if (req.user) {
-            await pool.query('INSERT INTO messages (conversation_id, role, content) VALUES ($1, $2, $3)', [sessionId, 'model', fullReply || '[No response generated]']);
+            try {
+                await pool.query('INSERT INTO messages (conversation_id, role, content) VALUES ($1, $2, $3)', [sessionId, 'model', fullReply || '[No response generated]']);
+            } catch (dbErr) {
+                console.warn(`[Chat] ⚠️ DB insert (model reply) failed: ${dbErr.message?.substring(0, 100)} — continuing without persistence`);
+            }
         }
         historyToUse.push({ role: "model", parts: [{ text: fullReply || '[No response generated]' }] });
         
@@ -2454,8 +2666,13 @@ app.post('/api/chat', optionalUserAuth, upload.array('files', 10), async (req, r
         safeSseEnd(res);
 
     } catch (error) {
-        console.error('Chat Endpoint Error:', error.message?.substring(0, 200));
+        console.error(`[Chat] ❌ Endpoint error: ${error.message?.substring(0, 200)}`);
         const allKeysExhausted = error.allKeysExhausted === true || (error.message && error.message.includes('All API keys exhausted'));
+
+        if (allKeysExhausted) {
+            console.error(`[Chat] ❌ All ${API_KEYS.length} keys exhausted after ${error.attempts || '?'} attempts — no key available`);
+            keyManager.logStatus();
+        }
 
         let errorMsg;
         if (allKeysExhausted) {

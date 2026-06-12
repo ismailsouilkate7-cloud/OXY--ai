@@ -17,7 +17,6 @@
     "compression": "^1.8.1",
     "cookie-parser": "^1.4.7",
     "dotenv": "^16.6.1",
-    "duck-duck-scrape": "^2.2.7",
     "express": "^4.22.2",
     "jsonwebtoken": "^9.0.3",
     "jszip": "^3.10.1",
