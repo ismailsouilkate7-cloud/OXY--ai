@@ -252,7 +252,6 @@ async function loadSessionsList() {
         showChatListEmpty();
     }
 }
-REPLACE
 
 async function deleteSession(id) {
     if (confirm("Are you sure you want to delete this conversation?")) {
@@ -706,9 +705,9 @@ function appendMessage(text, sender, finalRender = true, files = null) {
     if (sender === 'user') {
         if (text && finalRender) { const textEl = document.createElement('div'); textEl.className = 'msg-text-content'; textEl.textContent = text; content.appendChild(textEl); }
     } else if (finalRender && text) {
-        const widgetResult = OXYWidgetRenderer.detectAndRender(text);
+        const widgetResult = typeof OXYWidgetRenderer !== 'undefined' ? OXYWidgetRenderer.detectAndRender(text) : null;
         if (widgetResult) { const widgetWrap = document.createElement('div'); widgetWrap.className = 'oxy-widget-container'; widgetWrap.innerHTML = widgetResult.html; content.appendChild(widgetWrap); }
-        else { const textWrap = document.createElement('div'); const rawHtml = marked.parse(text); textWrap.innerHTML = DOMPurify.sanitize(rawHtml); content.appendChild(textWrap); formatCodeBlocks(content); }
+        else { const textWrap = document.createElement('div'); const rawHtml = typeof marked !== 'undefined' ? marked.parse(text) : text; textWrap.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(rawHtml) : rawHtml; content.appendChild(textWrap); formatCodeBlocks(content); }
     }
     const contentWrapper = document.createElement('div');
     contentWrapper.className = 'message-content-wrapper';
@@ -973,8 +972,8 @@ async function sendMessage(text, inlineDataOrFiles = [], isRegenerate = false, p
                                 const data = JSON.parse(dataStr);
                                 if (data.text) {
                                     fullResponse += data.text;
-                                    if (OXYWidgetRenderer.looksLikeJSON(fullResponse)) { contentDiv.innerHTML = '<div class="widget-loading"><span class="widget-loading-dot"></span><span class="widget-loading-dot"></span><span class="widget-loading-dot"></span><span class="widget-loading-text">Building widget…</span></div>'; }
-                                    else { const rawHtml = marked.parse(fullResponse); contentDiv.innerHTML = DOMPurify.sanitize(rawHtml); formatCodeBlocks(contentDiv); }
+                                    if (typeof OXYWidgetRenderer !== 'undefined' && OXYWidgetRenderer.looksLikeJSON(fullResponse)) { contentDiv.innerHTML = '<div class="widget-loading"><span class="widget-loading-dot"></span><span class="widget-loading-dot"></span><span class="widget-loading-dot"></span><span class="widget-loading-text">Building widget…</span></div>'; }
+                                    else { const rawHtml = typeof marked !== 'undefined' ? marked.parse(fullResponse) : fullResponse; contentDiv.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(rawHtml) : rawHtml; formatCodeBlocks(contentDiv); }
                                     chatContainer.scrollTop = chatContainer.scrollHeight;
                                 } else if (data.error) { contentDiv.innerHTML += `<br><span style="color: #ef4444;">❌ ${data.error}</span>`; }
                             } catch (parseErr) {}
@@ -989,7 +988,7 @@ async function sendMessage(text, inlineDataOrFiles = [], isRegenerate = false, p
         if (hasFiles) setUploadingState(false);
         if (error.name === 'AbortError') { const stoppedMsg = fullResponse + '\n\n*(Stopped)*'; currentChatHistory.push({ text: stoppedMsg, sender: 'bot' }); saveSession(); fullResponse = stoppedMsg; }
         else {
-            if (fullResponse) { const interruptedMsg = fullResponse + '\n\n*(Connection lost)*'; contentDiv.innerHTML = DOMPurify.sanitize(marked.parse(interruptedMsg)); formatCodeBlocks(contentDiv); currentChatHistory.push({ text: interruptedMsg, sender: 'bot' }); saveSession(); fullResponse = interruptedMsg; }
+            if (fullResponse) { const interruptedMsg = fullResponse + '\n\n*(Connection lost)*'; const rawHtml = typeof marked !== 'undefined' ? marked.parse(interruptedMsg) : interruptedMsg; contentDiv.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(rawHtml) : rawHtml; formatCodeBlocks(contentDiv); currentChatHistory.push({ text: interruptedMsg, sender: 'bot' }); saveSession(); fullResponse = interruptedMsg; }
             else { contentDiv.innerHTML = '<span style="color: #ef4444;">❌ Network error. Please try again.</span>'; fullResponse = 'Network error'; }
             console.error('Chat error:', error);
         }
@@ -999,7 +998,7 @@ async function sendMessage(text, inlineDataOrFiles = [], isRegenerate = false, p
         setUploadingState(false);
         updateSendButton();
         stopBtn.style.display = 'none'; regenBtn.style.display = 'flex';
-        if (fullResponse) { const widgetResult = OXYWidgetRenderer.detectAndRender(fullResponse); if (widgetResult) contentDiv.innerHTML = `<div class="oxy-widget-container">${widgetResult.html}</div>`; else { const rawHtml = marked.parse(fullResponse); contentDiv.innerHTML = DOMPurify.sanitize(rawHtml); formatCodeBlocks(contentDiv); } }
+        if (fullResponse) { const widgetResult = typeof OXYWidgetRenderer !== 'undefined' ? OXYWidgetRenderer.detectAndRender(fullResponse) : null; if (widgetResult) contentDiv.innerHTML = `<div class="oxy-widget-container">${widgetResult.html}</div>`; else { const rawHtml = typeof marked !== 'undefined' ? marked.parse(fullResponse) : fullResponse; contentDiv.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(rawHtml) : rawHtml; formatCodeBlocks(contentDiv); } }
         chatContainer.scrollTop = chatContainer.scrollHeight;
     }
 }
@@ -1050,8 +1049,7 @@ function formatCodeBlocks(container) {
         const pre = block.parentElement;
         if (!block.classList.contains('hljs')) {
             const langMatch = block.className.match(/language-(\w+)/); const lang = langMatch ? langMatch[1] : '';
-            if (lang && hljs.getLanguage(lang)) { try { block.setAttribute('data-highlighted', 'yes'); hljs.highlightElement(block); } catch (e) {} }
-            else { try { block.setAttribute('data-highlighted', 'yes'); hljs.highlightElement(block); } catch (e) {} }
+            if (typeof hljs !== 'undefined') { try { block.setAttribute('data-highlighted', 'yes'); hljs.highlightElement(block); } catch (e) {} }
         }
         if (!pre.parentElement.classList.contains('code-block-wrapper')) {
             const classStr = block.className.replace('hljs', '').replace('language-', '').replace(/\s+/g, '').trim();
@@ -1085,10 +1083,14 @@ if ('serviceWorker' in navigator) {
 })();
 
 function initApp() {
-    console.log('[App] Initializing VOSIL...');
-    loadSessionsList(); initLocation();
-    closeSidebar();
-    if (!currentSessionId) createNewSession();
+    try {
+        console.log('[App] Initializing VOSIL...');
+        loadSessionsList(); initLocation();
+        closeSidebar();
+        if (!currentSessionId) createNewSession();
+    } catch (err) {
+        console.error('[App] Initialization error:', err);
+    }
 }
 
 if (document.readyState === 'complete' || document.readyState === 'interactive') { initApp(); }
