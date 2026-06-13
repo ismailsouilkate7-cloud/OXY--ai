@@ -8,13 +8,11 @@ import JSZip from 'jszip';
 import mime from 'mime-types';
 import { v4 as uuidv4 } from 'uuid';
 import compression from 'compression';
+import cookieParser from 'cookie-parser';
 import fs from 'fs';
 
-import cookieParser from 'cookie-parser';
 import crypto from 'crypto';
-import jwt from 'jsonwebtoken';
 import pool, { initDb, isDatabaseReady, getDbDiagnostics } from './db.js';
-import bcrypt from 'bcrypt';
 
 dotenv.config();
 
@@ -148,6 +146,9 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 // Use gzip compression for responses
 app.use(compression());
 
+// Cookie parser — needed for admin session cookies
+app.use(cookieParser());
+
 // Serve static files with NO aggressive caching.
 //
 // Why no `max-age: 1d`?
@@ -219,193 +220,11 @@ app.use((req, res, next) => {
 app.set('trust proxy', 1);
 
 // ============================================================
-// COOKIE PARSER — for admin session cookies
-// ============================================================
-app.use(cookieParser());
-
-// ============================================================
-// USER AUTHENTICATION SYSTEM
-// ============================================================
-const JWT_SECRET = process.env.JWT_SECRET || 'fallback_secret_do_not_use_in_prod';
-
-// Password hashing will now use bcrypt directly in the route handlers
-
-// Middleware to protect routes
-function requireUserAuth(req, res, next) {
-    const token = req.cookies?.auth_token;
-    if (!token) {
-        return res.status(401).json({ error: 'Unauthorized: No token provided' });
-    }
-    try {
-        const decoded = jwt.verify(token, JWT_SECRET);
-        req.user = decoded; // { userId: '...', email: '...' }
-        next();
-    } catch (err) {
-        return res.status(401).json({ error: 'Unauthorized: Invalid token' });
-    }
-}
-
-// Optional auth middleware (doesn't block, just sets req.user if valid)
-function optionalUserAuth(req, res, next) {
-    const token = req.cookies?.auth_token;
-    if (token) {
-        try {
-            req.user = jwt.verify(token, JWT_SECRET);
-        } catch (err) {
-            // Invalid token, ignore
-        }
-    }
-    next();
-}
-
-// ============================================================
 // PAGE ROUTES
 // ============================================================
 
-app.get('/login', optionalUserAuth, (req, res) => {
-    if (req.user) {
-        return res.redirect('/chat');
-    }
-    res.sendFile(path.join(__dirname, 'public', 'login.html'));
-});
-
-app.get('/register', optionalUserAuth, (req, res) => {
-    if (req.user) {
-        return res.redirect('/chat');
-    }
-    res.sendFile(path.join(__dirname, 'public', 'register.html'));
-});
-
-app.get('/chat', optionalUserAuth, (req, res) => {
+app.get('/chat', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'chat.html'));
-});
-
-app.post('/api/auth/register', async (req, res) => {
-    const { email, password, name } = req.body;
-    console.log(`[Auth] Register attempt for email: ${email}`);
-
-    if (!email || !password) {
-        console.log('[Auth] Register blocked: missing email or password');
-        return res.status(400).json({ error: 'Email and password are required' });
-    }
-    
-    // Warn if DB is not connected
-    if (!isDatabaseReady()) {
-        console.error('[Auth] Register blocked: database not available');
-        return res.status(503).json({ error: 'Database is not connected. Chat works offline, but registration requires the database.' });
-    }
-
-    try {
-        const passwordHash = await bcrypt.hash(password, 10);
-        console.log(`[Auth] Password hashed successfully using bcrypt`);
-
-        const result = await pool.query(
-            'INSERT INTO users (email, password_hash, name) VALUES ($1, $2, $3) RETURNING id, email, name',
-            [email.toLowerCase(), passwordHash, name || null]
-        );
-
-        const user = result.rows[0];
-        const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '30d' });
-
-        // On Vercel (HTTPS terminated at edge), NODE_ENV may not be 'production' unless set in env vars.
-        // Use the isVercel flag + req.secure (works with trust proxy) to determine HTTPS correctly.
-        const isSecure = isVercel || req.secure || process.env.NODE_ENV === 'production';
-        console.log(`[Auth] Register success. Setting cookie: secure=${isSecure}, sameSite=lax, path=/, Vercel=${isVercel}, req.secure=${req.secure}`);
-
-        res.cookie('auth_token', token, {
-            httpOnly: true,
-            secure: isSecure,
-            sameSite: 'lax',
-            path: '/',
-            maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
-        });
-
-        res.json({ user });
-    } catch (err) {
-        if (err.code === '23505') { // unique violation
-            return res.status(400).json({ error: 'Email already exists' });
-        }
-        console.error('Registration error:', err);
-        res.status(500).json({ error: 'Internal server error' });
-    }
-});
-
-app.post('/api/auth/login', async (req, res) => {
-    const { email, password } = req.body;
-    console.log(`[Auth] Login attempt for email: ${email}`);
-
-    if (!email || !password) {
-        console.log('[Auth] Login blocked: missing email or password');
-        return res.status(400).json({ error: 'Email and password are required' });
-    }
-
-    if (!isDatabaseReady()) {
-        console.error('[Auth] Login blocked: database not available');
-        return res.status(503).json({ error: 'Database is not connected. Chat works offline, but login requires the database.' });
-    }
-
-    try {
-        console.log(`[Auth] Querying DB for email: ${email.toLowerCase()}`);
-        const result = await pool.query('SELECT * FROM users WHERE email = $1', [email.toLowerCase()]);
-        const user = result.rows[0];
-        console.log(`[Auth] User found: ${!!user}, user_id: ${user?.id}`);
-
-        if (!user) {
-            console.log(`[Auth] Login failed: user not found for email: ${email.toLowerCase()}`);
-            return res.status(401).json({ error: 'Invalid credentials' });
-        }
-
-        console.log(`[Auth] Verifying password for user ${user.id}...`);
-        console.log(`[Auth] Stored hash (first 30 chars): ${(user.password_hash || '').substring(0, 30)}...`);
-        const match = await bcrypt.compare(password, user.password_hash);
-        console.log(`[Auth] Password verification result: ${match}`);
-
-        if (!match) {
-            console.log(`[Auth] Login failed: password mismatch for user: ${user.id}`);
-            return res.status(401).json({ error: 'Invalid credentials' });
-        }
-
-        const token = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '30d' });
-
-        // On Vercel (HTTPS terminated at edge), NODE_ENV may not be 'production' unless set in env vars.
-        // Use the isVercel flag + req.secure (works with trust proxy) to determine HTTPS correctly.
-        const isSecure = isVercel || req.secure || process.env.NODE_ENV === 'production';
-        console.log(`[Auth] Login success. Setting cookie: secure=${isSecure}, sameSite=lax, path=/, Vercel=${isVercel}, req.secure=${req.secure}`);
-
-        res.cookie('auth_token', token, {
-            httpOnly: true,
-            secure: isSecure,
-            sameSite: 'lax',
-            path: '/',
-            maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days
-        });
-
-        res.json({ user: { id: user.id, email: user.email, name: user.name } });
-    } catch (err) {
-        console.error('[Auth] Login error:', err.message, err.stack?.substring(0, 200));
-        res.status(500).json({ error: 'Internal server error' });
-    }
-});
-
-app.post('/api/auth/logout', (req, res) => {
-    res.clearCookie('auth_token', { path: '/' });
-    res.json({ success: true });
-});
-
-app.get('/api/auth/me', requireUserAuth, async (req, res) => {
-    try {
-        console.log(`[Auth] /me lookup for userId: ${req.user.userId}`);
-        const result = await pool.query('SELECT id, email, name FROM users WHERE id = $1', [req.user.userId]);
-        if (result.rows.length === 0) {
-            console.log(`[Auth] /me failed: user not found for id: ${req.user.userId}`);
-            return res.status(404).json({ error: 'User not found' });
-        }
-        console.log(`[Auth] /me success for: ${result.rows[0].email}`);
-        res.json({ user: result.rows[0] });
-    } catch (err) {
-        console.error('Get me error:', err);
-        res.status(500).json({ error: 'Internal server error' });
-    }
 });
 
 // ============================================================
@@ -1303,7 +1122,7 @@ function getAIClient(keyIndex) {
     return new GoogleGenAI({ apiKey: API_KEYS[keyIndex] });
 }
 
-const SYSTEM_PROMPT = `You are SouilX created by Ismail Souilkate.
+const SYSTEM_PROMPT = `You are VOSIL created by Ismail Souilkate.
 kfch khasek tkon :
 -friendly, katkheser lhedra ila kheserha m3ak luser.
    -katjaweb 3la ay su2al kifma kan.
@@ -2204,12 +2023,11 @@ ${resultsBlock}
 // CONVERSATIONS & CHAT ENDPOINTS
 // ============================================================
 
-// GET /api/conversations - Get user's conversations
-app.get('/api/conversations', requireUserAuth, async (req, res) => {
+// GET /api/conversations - Get conversations
+app.get('/api/conversations', async (req, res) => {
     try {
         const result = await pool.query(
-            'SELECT id, title, updated_at FROM conversations WHERE user_id = $1 ORDER BY updated_at DESC',
-            [req.user.userId]
+            'SELECT id, title, updated_at FROM conversations ORDER BY updated_at DESC'
         );
         res.json(result.rows);
     } catch (err) {
@@ -2218,11 +2036,11 @@ app.get('/api/conversations', requireUserAuth, async (req, res) => {
 });
 
 // GET /api/conversations/:id/messages - Get messages for a conversation
-app.get('/api/conversations/:id/messages', requireUserAuth, async (req, res) => {
+app.get('/api/conversations/:id/messages', async (req, res) => {
     try {
         const convoResult = await pool.query(
-            'SELECT * FROM conversations WHERE id = $1 AND user_id = $2',
-            [req.params.id, req.user.userId]
+            'SELECT * FROM conversations WHERE id = $1',
+            [req.params.id]
         );
         if (convoResult.rows.length === 0) return res.status(404).json({ error: 'Conversation not found' });
 
@@ -2237,13 +2055,13 @@ app.get('/api/conversations/:id/messages', requireUserAuth, async (req, res) => 
 });
 
 // PUT /api/conversations/:id - Rename a conversation
-app.put('/api/conversations/:id', requireUserAuth, async (req, res) => {
+app.put('/api/conversations/:id', async (req, res) => {
     try {
         const { title } = req.body;
         if (!title) return res.status(400).json({ error: 'Title required' });
         await pool.query(
-            'UPDATE conversations SET title = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2 AND user_id = $3',
-            [title, req.params.id, req.user.userId]
+            'UPDATE conversations SET title = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
+            [title, req.params.id]
         );
         res.json({ success: true });
     } catch (err) {
@@ -2252,11 +2070,11 @@ app.put('/api/conversations/:id', requireUserAuth, async (req, res) => {
 });
 
 // DELETE /api/conversations/:id - Delete a conversation
-app.delete('/api/conversations/:id', requireUserAuth, async (req, res) => {
+app.delete('/api/conversations/:id', async (req, res) => {
     try {
         await pool.query(
-            'DELETE FROM conversations WHERE id = $1 AND user_id = $2',
-            [req.params.id, req.user.userId]
+            'DELETE FROM conversations WHERE id = $1',
+            [req.params.id]
         );
         res.json({ success: true });
     } catch (err) {
@@ -2278,7 +2096,7 @@ function validateSessionId(id) {
     return null;
 }
 
-app.post('/api/chat', optionalUserAuth, upload.array('files', 10), async (req, res) => {
+app.post('/api/chat', upload.array('files', 10), async (req, res) => {
     try {
         let message = (typeof req.body.message === 'string') ? req.body.message : '';
         let sessionId = validateSessionId(req.body.sessionId);
@@ -2395,40 +2213,6 @@ app.post('/api/chat', optionalUserAuth, upload.array('files', 10), async (req, r
         }
 
         let dbHistory = [];
-        if (req.user) {
-            try {
-                if (!isDatabaseReady()) {
-                    console.log('[Chat] ⚠️ Database unavailable — skipping DB history fetch, using in-memory fallback');
-                } else {
-                    let convoResult = await pool.query('SELECT * FROM conversations WHERE id = $1 AND user_id = $2', [sessionId, req.user.userId]);
-                    if (convoResult.rows.length === 0) {
-                        const title = (req.body.message || '').substring(0, 30) || 'New Chat';
-                        await pool.query('INSERT INTO conversations (id, user_id, title) VALUES ($1, $2, $3)', [sessionId, req.user.userId, title]);
-                    } else {
-                        await pool.query('UPDATE conversations SET updated_at = CURRENT_TIMESTAMP WHERE id = $1', [sessionId]);
-                        const msgResult = await pool.query('SELECT role, content FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC', [sessionId]);
-                        dbHistory = msgResult.rows.map(m => {
-                            const text = m.content || '';
-                            const parts = [];
-                            let cleanText = text;
-                            const pdfUriRegex = /\[PDF_URI:(.*?)\]/g;
-                            let match;
-                            while ((match = pdfUriRegex.exec(text)) !== null) {
-                                parts.push({ fileData: { mimeType: 'application/pdf', fileUri: match[1] } });
-                                cleanText = cleanText.replace(match[0], '');
-                            }
-                            cleanText = cleanText.trim();
-                            if (cleanText) {
-                                parts.push({ text: cleanText });
-                            }
-                            return { role: m.role, parts: parts.length > 0 ? parts : [{ text: '' }] };
-                        });
-                    }
-                }
-            } catch (dbErr) {
-                console.error(`[Chat] ⚠️ DB history fetch failed (${dbErr.message?.substring(0, 100)}) — falling back to in-memory`);
-            }
-        }
 
         const now = new Date();
         const currentDateStr = now.toLocaleDateString('en-US', { weekday: 'long', year: 'numeric', month: 'long', day: 'numeric' });
@@ -2450,18 +2234,12 @@ app.post('/api/chat', optionalUserAuth, upload.array('files', 10), async (req, r
         }
 
         let historyToUse = [];
-        if (req.user) {
-            historyToUse = dbHistory;
-        } else {
-            let session = chatSessions.get(sessionId);
-            if (session) historyToUse = session.history || [];
-        }
+        let session = chatSessions.get(sessionId);
+        if (session) historyToUse = session.history || [];
 
         if (historyToUse.length === 0) {
             historyToUse = [{ role: "user", parts: [{ text: currentSystemPrompt }] }, { role: "model", parts: [{ text: "Understood." }] }];
-            if (!req.user) {
-                chatSessions.set(sessionId, { history: historyToUse, createdAt: Date.now() });
-            }
+            chatSessions.set(sessionId, { history: historyToUse, createdAt: Date.now() });
         }
 
         let dbInserted = false;
@@ -2603,13 +2381,6 @@ app.post('/api/chat', optionalUserAuth, upload.array('files', 10), async (req, r
                     const historyText = [baseText, ...uriTags].filter(Boolean).join('\n');
                     
                     if (!dbInserted) {
-                        if (req.user) {
-                            try {
-                                await pool.query('INSERT INTO messages (conversation_id, role, content) VALUES ($1, $2, $3)', [sessionId, 'user', historyText]);
-                            } catch (dbErr) {
-                                console.warn(`[Chat] ⚠️ DB insert (user msg) failed: ${dbErr.message?.substring(0, 100)} — continuing without persistence`);
-                            }
-                        }
                         historyToUse.push({ role: "user", parts: [{ text: historyText }] });
                         dbInserted = true;
                     } else {
@@ -2641,25 +2412,15 @@ app.post('/api/chat', optionalUserAuth, upload.array('files', 10), async (req, r
             }
         }
 
-        if (req.user) {
-            try {
-                await pool.query('INSERT INTO messages (conversation_id, role, content) VALUES ($1, $2, $3)', [sessionId, 'model', fullReply || '[No response generated]']);
-            } catch (dbErr) {
-                console.warn(`[Chat] ⚠️ DB insert (model reply) failed: ${dbErr.message?.substring(0, 100)} — continuing without persistence`);
-            }
-        }
         historyToUse.push({ role: "model", parts: [{ text: fullReply || '[No response generated]' }] });
         
-        if (!req.user) {
-            const session = chatSessions.get(sessionId);
-            if (session) {
-                // Trim history to last 20 messages to prevent memory leak
-                if (historyToUse.length > 40) {
-                    const systemStart = historyToUse[0];
-                    historyToUse = [systemStart, ...historyToUse.slice(-39)];
-                }
-                session.history = historyToUse;
+        const sess = chatSessions.get(sessionId);
+        if (sess) {
+            if (historyToUse.length > 40) {
+                const systemStart = historyToUse[0];
+                historyToUse = [systemStart, ...historyToUse.slice(-39)];
             }
+            sess.history = historyToUse;
         }
 
         safeSseWrite(res, `data: ${JSON.stringify({ text: '', done: true, sessionId })}\n\n`);

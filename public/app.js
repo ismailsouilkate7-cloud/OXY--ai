@@ -1,5 +1,5 @@
 // ============================================================
-// souilX — Full Multimodal Chat App
+// VOSIL — Full Multimodal Chat App
 // ============================================================
 
 // === DOM ELEMENTS ===
@@ -18,7 +18,7 @@ const clearChatBtn = document.getElementById('clear-chat-btn');
 const shareBtn = document.getElementById('share-btn');
 
 // === LOCATION SERVICE ===
-let userLocation = (typeof souilXPersistence !== 'undefined' ? souilXPersistence.getItem('souilx_user_location') : localStorage.getItem('souilx_user_location')) || null;
+let userLocation = (typeof vosilPersistence !== 'undefined' ? vosilPersistence.getItem('vosil_user_location') : localStorage.getItem('vosil_user_location')) || null;
 
 async function fetchUserLocation() {
     try {
@@ -36,10 +36,10 @@ function initLocation() {
     fetchUserLocation().then(location => {
         if (location) {
             userLocation = location;
-            if (typeof souilXPersistence !== 'undefined') {
-                souilXPersistence.setItemSync('souilx_user_location', location);
+            if (typeof vosilPersistence !== 'undefined') {
+                vosilPersistence.setItemSync('vosil_user_location', location);
             } else {
-                localStorage.setItem('souilx_user_location', location);
+                localStorage.setItem('vosil_user_location', location);
             }
             if (OXYWidgetRenderer && OXYWidgetRenderer.setUserLocation) {
                 OXYWidgetRenderer.setUserLocation(location);
@@ -76,7 +76,6 @@ const lightboxImg = document.getElementById('lightbox-img');
 const lightboxClose = document.getElementById('lightbox-close');
 const lightboxDownload = document.getElementById('lightbox-download');
 const lightboxCounter = document.getElementById('lightbox-counter');
-const toastContainer = document.getElementById('toast-container');
 
 let lightboxImages = [];
 let lightboxCurrentIndex = 0;
@@ -88,7 +87,6 @@ let isGenerating = false;
 let isUploading = false;
 let isProcessingFiles = false;
 let currentChatHistory = [];
-let userName = 'User';
 let userGender = 'Prefer not to say';
 let pendingFiles = [];
 let cameraStream = null;
@@ -96,11 +94,11 @@ let cameraFacingMode = 'user';
 let fileIdCounter = 0;
 
 function getRecentFiles() {
-    if (typeof souilXPersistence !== 'undefined') {
-        const val = souilXPersistence.getItem('souilx_recent_files');
+    if (typeof vosilPersistence !== 'undefined') {
+        const val = vosilPersistence.getItem('vosil_recent_files');
         return Array.isArray(val) ? val : [];
     }
-    try { return JSON.parse(localStorage.getItem('souilx_recent_files') || '[]'); } catch { return []; }
+    try { return JSON.parse(localStorage.getItem('vosil_recent_files') || '[]'); } catch { return []; }
 }
 
 function addRecentFile(fileInfo) {
@@ -109,24 +107,26 @@ function addRecentFile(fileInfo) {
     if (existing !== -1) recent.splice(existing, 1);
     recent.unshift({ name: fileInfo.name, type: fileInfo.type, size: fileInfo.size, addedAt: Date.now() });
     if (recent.length > 20) recent.pop();
-    if (typeof souilXPersistence !== 'undefined') {
-        souilXPersistence.setItemSync('souilx_recent_files', recent);
+    if (typeof vosilPersistence !== 'undefined') {
+        vosilPersistence.setItemSync('vosil_recent_files', recent);
     } else {
-        localStorage.setItem('souilx_recent_files', JSON.stringify(recent));
+        localStorage.setItem('vosil_recent_files', JSON.stringify(recent));
     }
 }
 
-function showToast(message, type = 'info', duration = 3000) {
+window.showToast = function showToast(message, type = 'info', duration = 3000) {
+    const container = document.getElementById('toast-container');
+    if (!container) return;
     const toast = document.createElement('div');
     toast.className = `toast toast-${type}`;
     const icons = { info: 'fa-circle-info', success: 'fa-circle-check', error: 'fa-circle-xmark', warning: 'fa-triangle-exclamation' };
     toast.innerHTML = `<i class="fa-solid ${icons[type] || icons.info}"></i> <span>${message}</span>`;
-    toastContainer.appendChild(toast);
+    container.appendChild(toast);
     setTimeout(() => {
         toast.classList.add('toast-hide');
         setTimeout(() => toast.remove(), 300);
     }, duration);
-}
+};
 
 function updateUserUI() {
     const display = document.querySelector('.user-name');
@@ -145,24 +145,6 @@ shareBtn.addEventListener('click', () => {
 
 marked.use({ langPrefix: 'hljs language-', breaks: true });
 
-let currentUser = null;
-
-async function checkAuth() {
-    try {
-        const res = await fetch('/api/auth/me');
-        if (!res.ok) { window.location.href = '/login.html'; return false; }
-        const data = await res.json();
-        currentUser = data.user;
-        userName = currentUser.name || currentUser.email.split('@')[0] || 'User';
-        userGender = currentUser.gender || 'Prefer not to say';
-        document.getElementById('user-name-display').textContent = userName;
-        return true;
-    } catch (err) {
-        window.location.href = '/login.html';
-        return false;
-    }
-}
-
 function updateWelcomeGreeting() {
     try {
         const now = new Date(); const hour = now.getHours();
@@ -177,13 +159,6 @@ function updateWelcomeGreeting() {
         if (subEl) subEl.textContent = 'How can I help you today?';
     } catch (e) { /* no-op */ }
 }
-
-document.getElementById('logout-btn')?.addEventListener('click', async () => {
-    try {
-        await fetch('/api/auth/logout', { method: 'POST' });
-        window.location.href = '/login.html';
-    } catch (err) { console.error('Logout failed', err); }
-});
 
 async function loadSessionsList() {
     try {
@@ -275,14 +250,14 @@ function openSidebar() {
     sidebar.classList.remove('closed');
     sidebarOverlay.classList.add('active');
     document.body.style.overflow = 'hidden';
-    if (typeof souilXPersistence !== 'undefined') souilXPersistence.setItem('souilx_sidebar_open', true);
+    if (typeof vosilPersistence !== 'undefined') vosilPersistence.setItem('vosil_sidebar_open', true);
 }
 function closeSidebar() {
     sidebar.classList.remove('open');
     sidebar.classList.add('closed');
     sidebarOverlay.classList.remove('active');
     document.body.style.overflow = '';
-    if (typeof souilXPersistence !== 'undefined') souilXPersistence.setItem('souilx_sidebar_open', false);
+    if (typeof vosilPersistence !== 'undefined') vosilPersistence.setItem('vosil_sidebar_open', false);
 }
 function isSidebarOpen() {
     return sidebar.classList.contains('open');
@@ -1033,7 +1008,7 @@ if ('serviceWorker' in navigator) {
 }
 
 (function checkBackendHealth() {
-    const bannerId = 'souilx-backend-banner';
+    const bannerId = 'vosil-backend-banner';
     function showBanner(message) {
         if (document.getElementById(bannerId)) return;
         const banner = document.createElement('div'); banner.id = bannerId;
@@ -1043,12 +1018,10 @@ if ('serviceWorker' in navigator) {
     fetch('/api/health', { cache: 'no-store' }).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); }).then(data => { console.log('[Health] Backend OK on port', data.port, '— uptime', data.uptime.toFixed(0) + 's'); }).catch(err => { const port = window.location.port || (window.location.protocol === 'https:' ? 443 : 80); const host = window.location.hostname || 'localhost'; showBanner(`Backend not reachable at http://${host}:${port}. Run \`npm start\` in the project folder. (${err.message})`); });
 })();
 
-async function initApp() {
-    console.log('[App] Initializing souilX...');
-    const isAuthenticated = await checkAuth();
-    if (!isAuthenticated) return;
-    updateUserUI(); loadSessionsList(); initLocation();
-    closeSidebar(); // Ensure sidebar starts closed
+function initApp() {
+    console.log('[App] Initializing VOSIL...');
+    loadSessionsList(); initLocation();
+    closeSidebar();
     if (!currentSessionId) createNewSession();
 }
 

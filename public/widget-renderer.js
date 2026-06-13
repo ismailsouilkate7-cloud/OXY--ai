@@ -1,5 +1,5 @@
 // ============================================================
-// souilX — Widget Renderer for Structured JSON Responses
+// VOSIL — Widget Renderer for Structured JSON Responses
 // ============================================================
 // Detects JSON in AI responses and renders visual widgets/cards
 // instead of showing raw JSON text.
@@ -202,7 +202,7 @@ const OXYWidgetRenderer = (() => {
                 ${summary ? `<div class="wx-summary">${escapeHtml(summary)}</div>` : ''}
                 <div class="wx-footer">
                     <i class="fa-regular fa-clock"></i>
-                    <span>Weather data · souilX</span>
+                    <span>Weather data · VOSIL</span>
                 </div>
             </div>
         `;
@@ -261,7 +261,7 @@ const OXYWidgetRenderer = (() => {
                 ${recsHtml}
                 <div class="wx-footer">
                     <i class="fa-regular fa-clock"></i>
-                    <span>Weather analysis · souilX</span>
+                    <span>Weather analysis · VOSIL</span>
                 </div>
             </div>
         `;
@@ -321,7 +321,7 @@ const OXYWidgetRenderer = (() => {
                 ${itemsHtml}
                 <div class="wx-footer">
                     <i class="fa-regular fa-clock"></i>
-                    <span>Analysis report · souilX</span>
+                    <span>Analysis report · VOSIL</span>
                 </div>
             </div>
         `;
@@ -374,7 +374,7 @@ const OXYWidgetRenderer = (() => {
                 ${itemsHtml}
                 <div class="wx-footer">
                     <i class="fa-regular fa-circle-check"></i>
-                    <span>Information card · souilX</span>
+                    <span>Information card · VOSIL</span>
                 </div>
             </div>
         `;
@@ -497,7 +497,7 @@ const OXYWidgetRenderer = (() => {
                 ${summary ? `<div class="cd-summary">${escapeHtml(summary)}</div>` : ''}
                 <div class="wx-footer">
                     <i class="fa-regular fa-chart-bar"></i>
-                    <span>Data visualization · souilX</span>
+                    <span>Data visualization · VOSIL</span>
                 </div>
             </div>
         `;

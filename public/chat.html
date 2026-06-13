@@ -3,15 +3,15 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>souilX</title>
-    <meta name="description" content="souilX — Your intelligent, natural conversational assistant with multimodal capabilities.">
+    <title>VOSIL</title>
+    <meta name="description" content="VOSIL — Your intelligent, natural conversational assistant with multimodal capabilities.">
 
-    <meta property="og:title" content="souilX">
+    <meta property="og:title" content="VOSIL">
     <meta property="og:description" content="Your intelligent, natural conversational assistant with multimodal capabilities.">
     <meta property="og:type" content="website">
     <meta property="og:image" content="/icons/icon-512.png">
     <meta name="twitter:card" content="summary_large_image">
-    <meta name="twitter:title" content="souilX">
+    <meta name="twitter:title" content="VOSIL">
     <meta name="twitter:description" content="Your intelligent, natural conversational assistant with multimodal capabilities.">
     <meta name="twitter:image" content="/icons/icon-512.png">
 
@@ -20,7 +20,7 @@
     <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
-    <meta name="apple-mobile-web-app-title" content="souilX">
+    <meta name="apple-mobile-web-app-title" content="VOSIL">
     <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
@@ -63,7 +63,7 @@
         <!-- Sidebar — Floating Popup -->
         <aside class="sidebar">
             <div class="sidebar-header">
-                <span class="sidebar-title">souilX</span>
+                <span class="sidebar-title">VOSIL</span>
                 <button class="sidebar-close-btn" id="sidebar-close-btn" title="Close">
                     <i class="fa-solid fa-times"></i>
                 </button>
@@ -82,16 +82,20 @@
             </div>
             
             <div class="sidebar-footer">
-                <div class="user-profile">
-                    <div class="user-avatar" id="user-avatar-display">U</div>
+                <div class="user-profile" id="sidebar-profile-btn">
+                    <div class="user-avatar">VL</div>
                     <div class="user-info">
-                        <span class="user-name" id="user-name-display">User</span>
-                        
+                        <span class="user-name">VOSIL</span>
                     </div>
                 </div>
-                <button class="logout-btn" id="logout-btn" title="Log Out">
-                    <i class="fa-solid fa-arrow-right-from-bracket"></i>
-                </button>
+                <div class="sidebar-footer-actions">
+                    <button class="sidebar-footer-btn" id="sidebar-settings-btn" title="Settings">
+                        <i class="fa-solid fa-gear"></i>
+                    </button>
+                    <button class="sidebar-footer-btn" id="sidebar-logout-btn" title="Logout">
+                        <i class="fa-solid fa-right-from-bracket"></i>
+                    </button>
+                </div>
             </div>
         </aside>
 
@@ -113,7 +117,7 @@
             </button>
                 </div>
                 <div class="header-center">
-                    <div class="header-title">souilX</div>
+                    <div class="header-title">VOSIL</div>
                 </div>
                 <div class="header-right">
                     <button class="action-btn" id="header-new-chat-btn" title="New Chat">
@@ -124,6 +128,8 @@
                     </button>
                     <button class="action-btn" id="share-btn" title="Share"><i class="fa-solid fa-share-nodes"></i></button>
                     <button class="action-btn" id="clear-chat-btn" title="Clear Chat"><i class="fa-solid fa-trash"></i></button>
+                    
+
                 </div>
             </header>
 
@@ -140,7 +146,7 @@
                 <!-- Welcome Screen -->
                 <div class="welcome-screen" id="welcome-screen">
                     <div class="welcome-icon"><i class="fa-solid fa-sparkles"></i></div>
-                    <h1>Welcome to souilX</h1>
+                    <h1>Welcome to VOSIL</h1>
                     <p>Your intelligent, natural conversational assistant</p>
                     
                     <div class="suggestion-cards">
@@ -217,13 +223,13 @@
                         </div>
                     </div>
 
-                    <textarea id="message-input" placeholder="Message souilX..." rows="1"></textarea>
+                    <textarea id="message-input" placeholder="Message VOSIL..." rows="1"></textarea>
                     
                     <button class="send-btn" id="send-btn" disabled>
                         <i class="fa-solid fa-arrow-up"></i>
                     </button>
                 </div>
-                <div class="disclaimer">souilX may produce inaccurate information. Please verify important details.</div>
+                <div class="disclaimer">VOSIL may produce inaccurate information. Please verify important details.</div>
             </div>
         </main>
     </div>
@@ -273,10 +279,217 @@
         <button class="lightbox-download" id="lightbox-download"><i class="fa-solid fa-download"></i> Download</button>
     </div>
 
+    <!-- Profile Modal -->
+    <div class="profile-modal" id="profile-modal" style="display: none;">
+        <div class="profile-modal-content">
+            <div class="profile-modal-header">
+                <h3><i class="fa-solid fa-user"></i> Profile</h3>
+                <button class="profile-modal-close" id="profile-modal-close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="profile-modal-body">
+                <div class="profile-avatar-section">
+                    <div class="profile-avatar" id="profile-avatar">VL</div>
+                </div>
+                <div class="profile-info-section">
+                    <div class="profile-field">
+                        <span class="profile-label">Name</span>
+                        <span class="profile-value" id="profile-name">—</span>
+                    </div>
+                    <div class="profile-field">
+                        <span class="profile-label">Email</span>
+                        <span class="profile-value" id="profile-email">—</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Settings Modal -->
+    <div class="settings-modal" id="settings-modal" style="display: none;">
+        <div class="settings-modal-content">
+            <div class="settings-modal-header">
+                <h3><i class="fa-solid fa-gear"></i> Settings</h3>
+                <button class="settings-modal-close" id="settings-modal-close"><i class="fa-solid fa-xmark"></i></button>
+            </div>
+            <div class="settings-modal-body">
+                <div class="settings-field">
+                    <label for="settings-name">Display Name</label>
+                    <input type="text" id="settings-name" placeholder="Your name" maxlength="50">
+                </div>
+                <div class="settings-field">
+                    <label for="settings-photourl">Avatar URL</label>
+                    <input type="url" id="settings-photourl" placeholder="https://example.com/avatar.jpg">
+                </div>
+            </div>
+            <div class="settings-modal-footer">
+                <button class="settings-save-btn" id="settings-save-btn">
+                    <span id="settings-save-text">Save</span>
+                    <span class="settings-spinner" id="settings-spinner" style="display: none;"></span>
+                </button>
+            </div>
+        </div>
+    </div>
+
     <!-- Toast Container -->
     <div class="toast-container" id="toast-container"></div>
 
     <script src="persistence.js"></script>
-    <script src="app.js"></script>
+    <script type="module">
+        import { doc, getDoc, updateDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+        import { db, auth } from './firebase-config.js';
+        import { onAuthStateChanged, updateProfile } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
+        import { subscribeToAuthChanges, signOutUser } from './auth.js';
+        
+        // Define global userName
+        window.userName = 'User';
+        window.userData = null;
+        window.currentUser = null;
+        
+        subscribeToAuthChanges((authState) => {
+            if (!authState || !authState.user) {
+                window.location.href = '/';
+                return;
+            }
+            
+            const user = authState.user;
+            const userData = authState.userData;
+            window.currentUser = user;
+            window.userData = userData;
+            window.userName = userData.name || user.displayName || 'User';
+            
+            // Update Sidebar
+            const sidebarName = document.querySelector('.user-name');
+            const sidebarAvatar = document.querySelector('.user-avatar');
+            if (sidebarName) sidebarName.textContent = window.userName;
+            if (sidebarAvatar) {
+                if (userData.photoURL) {
+                    sidebarAvatar.innerHTML = `<img src="${userData.photoURL}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
+                } else {
+                    sidebarAvatar.textContent = window.userName.charAt(0).toUpperCase();
+                }
+            }
+        });
+
+        document.getElementById('btn-logout').addEventListener('click', async () => {
+            await signOutUser();
+            window.location.href = '/';
+        });
+
+        // ─── Profile Modal ───
+        const profileBtn = document.getElementById('sidebar-profile-btn');
+        const profileModal = document.getElementById('profile-modal');
+        const profileClose = document.getElementById('profile-modal-close');
+        const profileAvatar = document.getElementById('profile-avatar');
+        const profileName = document.getElementById('profile-name');
+        const profileEmail = document.getElementById('profile-email');
+
+        function openProfileModal() {
+            const u = window.currentUser;
+            const d = window.userData;
+            if (!u) return;
+            const name = d?.name || u.displayName || 'User';
+            const email = u.email || '—';
+            const photoURL = d?.photoURL || u.photoURL || null;
+            if (photoURL) {
+                profileAvatar.innerHTML = `<img src="${photoURL}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
+            } else {
+                profileAvatar.textContent = name.charAt(0).toUpperCase();
+            }
+            profileName.textContent = name;
+            profileEmail.textContent = email;
+            profileModal.style.display = 'flex';
+        }
+        function closeProfileModal() { profileModal.style.display = 'none'; }
+        profileBtn.addEventListener('click', openProfileModal);
+        profileClose.addEventListener('click', closeProfileModal);
+        profileModal.addEventListener('click', (e) => { if (e.target === profileModal) closeProfileModal(); });
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && profileModal.style.display === 'flex') closeProfileModal(); });
+
+        // ─── Settings Modal ───
+        const settingsBtn = document.getElementById('sidebar-settings-btn');
+        const settingsModal = document.getElementById('settings-modal');
+        const settingsClose = document.getElementById('settings-modal-close');
+        const settingsName = document.getElementById('settings-name');
+        const settingsPhotoURL = document.getElementById('settings-photourl');
+        const settingsSaveBtn = document.getElementById('settings-save-btn');
+        const settingsSaveText = document.getElementById('settings-save-text');
+        const settingsSpinner = document.getElementById('settings-spinner');
+
+        function openSettingsModal() {
+            const u = window.currentUser;
+            const d = window.userData;
+            if (!u) return;
+            settingsName.value = d?.name || u.displayName || '';
+            settingsPhotoURL.value = d?.photoURL || u.photoURL || '';
+            settingsSaveBtn.disabled = false;
+            settingsSaveText.textContent = 'Save';
+            settingsSpinner.style.display = 'none';
+            settingsModal.style.display = 'flex';
+        }
+        function closeSettingsModal() { settingsModal.style.display = 'none'; }
+        settingsBtn.addEventListener('click', openSettingsModal);
+        settingsClose.addEventListener('click', closeSettingsModal);
+        settingsModal.addEventListener('click', (e) => { if (e.target === settingsModal) closeSettingsModal(); });
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && settingsModal.style.display === 'flex') closeSettingsModal(); });
+
+        settingsSaveBtn.addEventListener('click', async () => {
+            const u = window.currentUser;
+            if (!u) return;
+            const newName = settingsName.value.trim();
+            const newPhotoURL = settingsPhotoURL.value.trim();
+            if (!newName) { alert('Name cannot be empty.'); return; }
+            settingsSaveBtn.disabled = true;
+            settingsSaveText.textContent = 'Saving…';
+            settingsSpinner.style.display = 'inline-block';
+            try {
+                const updates = {};
+                if (newName !== (window.userData?.name || u.displayName)) {
+                    await updateProfile(u, { displayName: newName });
+                    updates.name = newName;
+                }
+                if (newPhotoURL !== (window.userData?.photoURL || u.photoURL)) {
+                    if (newPhotoURL) {
+                        await updateProfile(u, { photoURL: newPhotoURL });
+                        updates.photoURL = newPhotoURL;
+                    } else {
+                        updates.photoURL = null;
+                    }
+                }
+                if (Object.keys(updates).length > 0) {
+                    await updateDoc(doc(db, "users", u.uid), updates);
+                    window.userData = { ...window.userData, ...updates };
+                    window.userName = updates.name || window.userName;
+                    // Refresh sidebar
+                    const sidebarName = document.querySelector('.user-name');
+                    const sidebarAvatar = document.querySelector('.user-avatar');
+                    if (sidebarName) sidebarName.textContent = window.userName;
+                    if (sidebarAvatar) {
+                        if (updates.photoURL || (newPhotoURL && !updates.photoURL)) {
+                            sidebarAvatar.innerHTML = `<img src="${newPhotoURL}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
+                        } else if (!newPhotoURL) {
+                            const uName = window.userData?.name || window.currentUser?.displayName || 'User';
+                            sidebarAvatar.textContent = uName.charAt(0).toUpperCase();
+                        }
+                    }
+                }
+                closeSettingsModal();
+                showToast('Settings saved!', 'success');
+            } catch (err) {
+                console.error('Settings save error:', err);
+                alert('Failed to save: ' + err.message);
+            } finally {
+                settingsSaveBtn.disabled = false;
+                settingsSaveText.textContent = 'Save';
+                settingsSpinner.style.display = 'none';
+            }
+        });
+
+        // ─── Sidebar Logout ───
+        document.getElementById('sidebar-logout-btn').addEventListener('click', async () => {
+            await signOutUser();
+            window.location.href = '/';
+        });
+    </script>
+    <script src="app.js" type="module"></script>
 </body>
 </html>

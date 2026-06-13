@@ -92,23 +92,11 @@ body {
 }
 .nav-links a:hover { color: var(--primary); }
 
-.auth-buttons {
+.nav-actions {
     display: flex;
     align-items: center;
     gap: clamp(12px, 2vw, 16px);
 }
-.btn-login {
-    color: var(--text-muted);
-    text-decoration: none;
-    font-weight: 500;
-    font-size: clamp(14px, 1vw, 15px);
-    transition: color var(--transition-base);
-    min-height: 44px;
-    display: flex;
-    align-items: center;
-    padding: 0 8px;
-}
-.btn-login:hover { color: var(--primary); }
 
 .btn-signup, .btn-primary {
     background: var(--primary);
@@ -131,6 +119,7 @@ body {
     transform: translateY(-2px);
     box-shadow: 0 4px 20px rgba(168, 85, 247, 0.25);
 }
+.btn-login,
 .btn-secondary {
     background: rgba(255, 255, 255, 0.06);
     color: var(--text-main);
@@ -146,6 +135,7 @@ body {
     gap: 8px;
     min-height: 44px;
 }
+.btn-login:hover,
 .btn-secondary:hover {
     background: rgba(255, 255, 255, 0.1);
     border-color: rgba(255, 255, 255, 0.15);
@@ -452,8 +442,7 @@ body {
     .logo-text { font-size: 18px; }
     .logo-ring { width: 28px; height: 28px; }
     .btn-signup, .btn-primary { padding: 8px 16px; font-size: 14px; }
-    .auth-buttons { gap: 8px; }
-    .auth-buttons .btn-login { display: none; }
+    .nav-actions { gap: 8px; }
     .hero { padding: 80px 16px 40px; }
     .hero-title { font-size: clamp(28px, 7vw, 32px); }
     .hero-subtitle { font-size: 15px; margin-bottom: 24px; }
@@ -469,3 +458,85 @@ body {
     .user-message { font-size: 14px; }
     .ai-content { font-size: 14px; padding: 14px; }
 }
+/* Auth Modal */
+.auth-modal-overlay {
+    position: fixed;
+    top: 0; left: 0; width: 100%; height: 100%;
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(8px);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.auth-modal {
+    background: #111111;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    padding: 40px;
+    width: 100%;
+    max-width: 420px;
+    position: relative;
+    box-shadow: 0 24px 48px rgba(0,0,0,0.5);
+}
+.close-modal {
+    position: absolute;
+    top: 16px; right: 16px;
+    background: none; border: none;
+    color: #666; font-size: 20px; cursor: pointer;
+}
+.close-modal:hover { color: #fff; }
+.auth-logo {
+    display: flex; align-items: center; justify-content: center;
+    gap: 8px; margin-bottom: 24px;
+}
+.auth-modal h2 { text-align: center; margin-bottom: 24px; font-weight: 600; font-size: 24px; }
+.input-group { margin-bottom: 16px; }
+.input-group label { display: block; margin-bottom: 8px; font-size: 14px; color: #aaa; }
+.input-group input {
+    width: 100%; padding: 12px;
+    background: #1a1a1a;
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    color: #fff;
+    font-size: 16px;
+    outline: none;
+}
+.input-group input:focus { border-color: var(--primary); }
+.auth-submit { width: 100%; margin-top: 8px; justify-content: center; }
+.auth-divider {
+    text-align: center; margin: 24px 0;
+    position: relative;
+}
+.auth-divider::before {
+    content: ""; position: absolute;
+    top: 50%; left: 0; right: 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+    z-index: 1;
+}
+.auth-divider span {
+    background: #111111; padding: 0 16px;
+    color: #666; font-size: 14px;
+    position: relative; z-index: 2;
+}
+.btn-google {
+    width: 100%;
+    padding: 12px;
+    background: #fff; color: #000;
+    border: none; border-radius: 8px;
+    font-size: 16px; font-weight: 500;
+    cursor: pointer;
+    display: flex; align-items: center; justify-content: center; gap: 12px;
+}
+.btn-google:hover { background: #f0f0f0; }
+.auth-switch { text-align: center; margin-top: 24px; color: #aaa; font-size: 14px; }
+.btn-text { background: none; border: none; color: var(--primary); font-size: 14px; cursor: pointer; padding: 0; margin-left: 4px; }
+.btn-text:hover { text-decoration: underline; }
+.auth-error { background: rgba(255, 0, 0, 0.1); color: #ff5555; padding: 12px; border-radius: 8px; margin-bottom: 16px; font-size: 14px; text-align: center; }
+.auth-spinner {
+    width: 16px; height: 16px;
+    border: 2px solid rgba(255,255,255,0.3);
+    border-top-color: #fff; border-radius: 50%;
+    animation: spin 0.6s linear infinite;
+}
+

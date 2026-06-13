@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>souilX - Advanced AI Intelligence</title>
-    <meta name="description" content="souilX is a state-of-the-art conversational AI designed to help you reason, write, code, and learn.">
+    <title>VOSIL - Advanced AI Intelligence</title>
+    <meta name="description" content="VOSIL is a state-of-the-art conversational AI designed to help you reason, write, code, and learn.">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
@@ -26,17 +26,16 @@
         <div class="header-container">
             <a href="/" class="logo">
                 <div class="logo-ring"></div>
-                <div class="logo-text"><span>souil</span><span>X</span></div>
+                <div class="logo-text"><span>VOSIL</span></div>
             </a>
             <nav class="nav-links">
                 <a href="#about">About</a>
                 <a href="#features">Features</a>
                 <a href="#demo">Demo</a>
             </nav>
-            <div class="auth-buttons" id="auth-buttons">
-                <!-- Javascript will change these if logged in -->
-                <a href="/login" class="btn-login">Log In</a>
-                <a href="/register" class="btn-signup">Sign Up</a>
+            <div class="nav-actions" id="nav-actions">
+                <button class="btn-login" onclick="openAuthModal('login')">Log in</button>
+                <button class="btn-signup" onclick="openAuthModal('signup')">Sign up</button>
             </div>
         </div>
     </header>
@@ -44,12 +43,12 @@
     <main>
         <section class="hero" id="about">
             <div class="hero-content">
-                <div class="badge">Introducing souilX</div>
+                <div class="badge">Introducing VOSIL</div>
                 <h1 class="hero-title">Experience the future of <span class="gradient-text">Intelligence</span></h1>
-                <p class="hero-subtitle">souilX is an advanced conversational model designed for complex reasoning, seamless coding, and deep analysis. Fast, secure, and always learning, perfect darija.</p>
+                <p class="hero-subtitle">VOSIL is an advanced conversational model designed for complex reasoning, seamless coding, and deep analysis. Fast, secure, and always learning, perfect darija.</p>
                 <div class="hero-actions" id="hero-actions">
-                    <a href="/register" class="btn-primary">Sign Up for Free</a>
-                    <a href="/chat" class="btn-secondary">Start Chatting</a>
+                    <button class="btn-primary" onclick="openAuthModal('signup')">Sign up</button>
+                    <button class="btn-secondary" onclick="openAuthModal('login')">Log in</button>
                 </div>
             </div>
         </section>
@@ -63,7 +62,7 @@
                 <div class="feature-card">
                     <div class="feature-icon">🧠</div>
                     <h3>Advanced Reasoning</h3>
-                    <p>souilX breaks down complex problems into logical steps, providing thorough and accurate solutions.</p>
+                    <p>VOSIL breaks down complex problems into logical steps, providing thorough and accurate solutions.</p>
                 </div>
                 <div class="feature-card">
                     <div class="feature-icon">💻</div>
@@ -73,7 +72,7 @@
                 <div class="feature-card">
                     <div class="feature-icon">📄</div>
                     <h3>Document Analysis</h3>
-                    <p>Upload Images, PDFs, Videos, souilX understands content instantly and answers your specific questions.</p>
+                    <p>Upload Images, PDFs, Videos, VOSIL understands content instantly and answers your specific questions.</p>
                 </div>
                 <div class="feature-card">
                     <div class="feature-icon">⚡</div>
@@ -83,17 +82,17 @@
                 <div class="feature-card">
                     <div class="feature-icon">💬</div>
                     <h3>Moroccan Darija</h3>
-                    <p>souilX can understand and respond with perfect Moroccan Darija.</p>
+                    <p>VOSIL can understand and respond with perfect Moroccan Darija.</p>
                 </div>
                 <div class="feature-card">
                     <div class="feature-icon">💬</div>
                     <h3>Languages</h3>
-                    <p>souilX can understand and respond in multiple languages.</p>
+                    <p>VOSIL can understand and respond in multiple languages.</p>
                 </div>
                 <div class="feature-card">
                     <div class="feature-icon">💬</div>
                     <h3>Talking </h3>
-                    <p>souilX talk like a humain not robot and friendly personality.</p>
+                    <p>VOSIL talk like a humain not robot and friendly personality.</p>
                 </div>
                 <div class="feature-card">
                     <div class="feature-icon">🎨</div>
@@ -111,7 +110,7 @@
                     <div class="demo-dots">
                         <span></span><span></span><span></span>
                     </div>
-                    <div class="demo-title">souilX Interface</div>
+                    <div class="demo-title">VOSIL Interface</div>
                 </div>
                 <div class="demo-body">
                     <div class="demo-message user-message">
@@ -139,7 +138,7 @@
             <div class="footer-brand">
                 <div class="logo">
                     <div class="logo-ring"></div>
-                    <div class="logo-text"><span>souil</span><span>X</span></div>
+                    <div class="logo-text"><span>VOSIL</span></div>
                 </div>
                 <p>Advanced conversational AI for everyone.</p>
             </div>
@@ -148,7 +147,7 @@
                     <h4>Product</h4>
                     <a href="#features">Features</a>
                     <a href="#demo">Demo</a>
-                    <a href="/login">Log In</a>
+                    <a href="/chat">Start Chatting</a>
                 </div>
                 <div class="footer-column">
                     <h4>Legal</h4>
@@ -159,25 +158,144 @@
             </div>
         </div>
         <div class="footer-bottom">
-            &copy; 2026 souilX. All rights reserved.
+            &copy; 2026 VOSIL. All rights reserved.
         </div>
     </footer>
 
-    <script>
-        // Check authentication status to update UI
-        document.addEventListener('DOMContentLoaded', async () => {
+
+    </footer>
+
+    <!-- Auth Modal -->
+    <div class="auth-modal-overlay" id="auth-modal" style="display: none;">
+        <div class="auth-modal">
+            <button class="close-modal" onclick="closeAuthModal()">✕</button>
+            
+            <div class="auth-logo">
+                <div class="logo-ring"></div>
+                <div class="logo-text"><span>VOSIL</span></div>
+            </div>
+            
+            <h2 id="auth-title">Welcome back</h2>
+            
+            <form id="auth-form">
+                <div class="input-group" id="name-group" style="display: none;">
+                    <label for="auth-name">Name</label>
+                    <input type="text" id="auth-name" placeholder="John Doe">
+                </div>
+                <div class="input-group">
+                    <label for="auth-email">Email address</label>
+                    <input type="email" id="auth-email" required placeholder="name@example.com">
+                </div>
+                <div class="input-group">
+                    <label for="auth-password">Password</label>
+                    <input type="password" id="auth-password" required placeholder="••••••••">
+                </div>
+                
+                <div class="auth-error" id="auth-error" style="display: none;"></div>
+                
+                <button type="submit" class="btn-primary auth-submit" id="auth-submit-btn">
+                    <span id="auth-submit-text">Continue</span>
+                    <span class="auth-spinner" id="auth-spinner" style="display: none;"></span>
+                </button>
+            </form>
+            
+            <div class="auth-divider"><span>OR</span></div>
+            
+            <button class="btn-google" id="btn-google">
+                <svg viewBox="0 0 24 24" width="20" height="20">
+                    <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z"/>
+                    <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z"/>
+                    <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.07H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.93l2.85-2.22.81-.62z"/>
+                    <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.07l3.66 2.84c.87-2.6 3.3-4.53 6.16-4.53z"/>
+                </svg>
+                Continue with Google
+            </button>
+            
+            <p class="auth-switch">
+                <span id="auth-switch-text">Don't have an account?</span>
+                <button type="button" class="btn-text" onclick="toggleAuthMode()" id="auth-switch-btn">Sign up</button>
+            </p>
+        </div>
+    </div>
+
+    <script type="module">
+        import { signUpUser, signInUser, signInWithGoogle, subscribeToAuthChanges } from './auth.js';
+        
+        // Expose functions to window for onclick handlers
+        window.currentAuthMode = 'login';
+        
+        window.openAuthModal = (mode) => {
+            document.getElementById('auth-modal').style.display = 'flex';
+            window.currentAuthMode = mode;
+            updateAuthUI();
+        };
+        
+        window.closeAuthModal = () => {
+            document.getElementById('auth-modal').style.display = 'none';
+        };
+        
+        window.toggleAuthMode = () => {
+            window.currentAuthMode = window.currentAuthMode === 'login' ? 'signup' : 'login';
+            updateAuthUI();
+        };
+        
+        function updateAuthUI() {
+            const isLogin = window.currentAuthMode === 'login';
+            document.getElementById('auth-title').textContent = isLogin ? 'Welcome back' : 'Create an account';
+            document.getElementById('name-group').style.display = isLogin ? 'none' : 'block';
+            if (!isLogin) document.getElementById('auth-name').setAttribute('required', 'true');
+            else document.getElementById('auth-name').removeAttribute('required');
+            
+            document.getElementById('auth-submit-text').textContent = 'Continue';
+            document.getElementById('auth-switch-text').textContent = isLogin ? "Don't have an account?" : "Already have an account?";
+            document.getElementById('auth-switch-btn').textContent = isLogin ? "Sign up" : "Log in";
+            document.getElementById('auth-error').style.display = 'none';
+        }
+        
+        document.getElementById('auth-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const email = document.getElementById('auth-email').value;
+            const password = document.getElementById('auth-password').value;
+            const name = document.getElementById('auth-name').value;
+            
+            const btnText = document.getElementById('auth-submit-text');
+            const spinner = document.getElementById('auth-spinner');
+            const errorDiv = document.getElementById('auth-error');
+            
+            btnText.style.display = 'none';
+            spinner.style.display = 'inline-block';
+            errorDiv.style.display = 'none';
+            document.getElementById('auth-submit-btn').disabled = true;
+            
             try {
-                const res = await fetch('/api/auth/me');
-                if (res.ok) {
-                    // User is authenticated
-                    const authButtons = document.getElementById('auth-buttons');
-                    const heroActions = document.getElementById('hero-actions');
-                    
-                    authButtons.innerHTML = '<a href="/chat" class="btn-primary">Go to Chat</a>';
-                    heroActions.innerHTML = '<a href="/chat" class="btn-primary">Go to Chat</a>';
+                if (window.currentAuthMode === 'signup') {
+                    await signUpUser(name, email, password);
+                } else {
+                    await signInUser(email, password);
                 }
-            } catch (err) {
-                console.error('Failed to check auth status', err);
+                // Auth observer will redirect
+            } catch (error) {
+                errorDiv.textContent = error.message.replace('Firebase: ', '');
+                errorDiv.style.display = 'block';
+                btnText.style.display = 'inline';
+                spinner.style.display = 'none';
+                document.getElementById('auth-submit-btn').disabled = false;
+            }
+        });
+        
+        document.getElementById('btn-google').addEventListener('click', async () => {
+            try {
+                await signInWithGoogle();
+                // Auth observer will redirect
+            } catch (error) {
+                console.error(error);
+            }
+        });
+
+        // Redirect if already logged in
+        subscribeToAuthChanges((authState) => {
+            if (authState && authState.user) {
+                window.location.href = '/chat';
             }
         });
     </script>

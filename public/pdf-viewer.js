@@ -1,5 +1,5 @@
 // ============================================================
-// souilX — Client-side PDF Viewer (browser-only)
+// VOSIL — Client-side PDF Viewer (browser-only)
 // ============================================================
 // Loads pdf.js dynamically from CDN to avoid Vercel/Node.js crashes.
 // Contains "typeof window === 'undefined'" guard for SSR safety.
