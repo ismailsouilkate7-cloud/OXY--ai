@@ -370,11 +370,6 @@
             }
         });
 
-        document.getElementById('btn-logout').addEventListener('click', async () => {
-            await signOutUser();
-            window.location.href = '/';
-        });
-
         // ─── Profile Modal ───
         const profileBtn = document.getElementById('sidebar-profile-btn');
         const profileModal = document.getElementById('profile-modal');
@@ -386,24 +381,24 @@
         function openProfileModal() {
             const u = window.currentUser;
             const d = window.userData;
-            if (!u) return;
+            if (!u || !profileModal) return;
             const name = d?.name || u.displayName || 'User';
             const email = u.email || '—';
             const photoURL = d?.photoURL || u.photoURL || null;
-            if (photoURL) {
+            if (photoURL && profileAvatar) {
                 profileAvatar.innerHTML = `<img src="${photoURL}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
-            } else {
+            } else if (profileAvatar) {
                 profileAvatar.textContent = name.charAt(0).toUpperCase();
             }
-            profileName.textContent = name;
-            profileEmail.textContent = email;
+            if (profileName) profileName.textContent = name;
+            if (profileEmail) profileEmail.textContent = email;
             profileModal.style.display = 'flex';
         }
-        function closeProfileModal() { profileModal.style.display = 'none'; }
-        profileBtn.addEventListener('click', openProfileModal);
-        profileClose.addEventListener('click', closeProfileModal);
-        profileModal.addEventListener('click', (e) => { if (e.target === profileModal) closeProfileModal(); });
-        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && profileModal.style.display === 'flex') closeProfileModal(); });
+        function closeProfileModal() { if (profileModal) profileModal.style.display = 'none'; }
+        if (profileBtn) profileBtn.addEventListener('click', openProfileModal);
+        if (profileClose) profileClose.addEventListener('click', closeProfileModal);
+        if (profileModal) profileModal.addEventListener('click', (e) => { if (e.target === profileModal) closeProfileModal(); });
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && profileModal?.style.display === 'flex') closeProfileModal(); });
 
         // ─── Settings Modal ───
         const settingsBtn = document.getElementById('sidebar-settings-btn');
@@ -418,21 +413,21 @@
         function openSettingsModal() {
             const u = window.currentUser;
             const d = window.userData;
-            if (!u) return;
-            settingsName.value = d?.name || u.displayName || '';
-            settingsPhotoURL.value = d?.photoURL || u.photoURL || '';
-            settingsSaveBtn.disabled = false;
-            settingsSaveText.textContent = 'Save';
-            settingsSpinner.style.display = 'none';
+            if (!u || !settingsModal) return;
+            if (settingsName) settingsName.value = d?.name || u.displayName || '';
+            if (settingsPhotoURL) settingsPhotoURL.value = d?.photoURL || u.photoURL || '';
+            if (settingsSaveBtn) settingsSaveBtn.disabled = false;
+            if (settingsSaveText) settingsSaveText.textContent = 'Save';
+            if (settingsSpinner) settingsSpinner.style.display = 'none';
             settingsModal.style.display = 'flex';
         }
-        function closeSettingsModal() { settingsModal.style.display = 'none'; }
-        settingsBtn.addEventListener('click', openSettingsModal);
-        settingsClose.addEventListener('click', closeSettingsModal);
-        settingsModal.addEventListener('click', (e) => { if (e.target === settingsModal) closeSettingsModal(); });
-        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && settingsModal.style.display === 'flex') closeSettingsModal(); });
+        function closeSettingsModal() { if (settingsModal) settingsModal.style.display = 'none'; }
+        if (settingsBtn) settingsBtn.addEventListener('click', openSettingsModal);
+        if (settingsClose) settingsClose.addEventListener('click', closeSettingsModal);
+        if (settingsModal) settingsModal.addEventListener('click', (e) => { if (e.target === settingsModal) closeSettingsModal(); });
+        document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && settingsModal?.style.display === 'flex') closeSettingsModal(); });
 
-        settingsSaveBtn.addEventListener('click', async () => {
+        if (settingsSaveBtn) { settingsSaveBtn.addEventListener('click', async () => {
             const u = window.currentUser;
             if (!u) return;
             const newName = settingsName.value.trim();
@@ -478,17 +473,20 @@
                 console.error('Settings save error:', err);
                 alert('Failed to save: ' + err.message);
             } finally {
-                settingsSaveBtn.disabled = false;
-                settingsSaveText.textContent = 'Save';
-                settingsSpinner.style.display = 'none';
+                if (settingsSaveBtn) settingsSaveBtn.disabled = false;
+                if (settingsSaveText) settingsSaveText.textContent = 'Save';
+                if (settingsSpinner) settingsSpinner.style.display = 'none';
             }
-        });
+        }); }
 
         // ─── Sidebar Logout ───
-        document.getElementById('sidebar-logout-btn').addEventListener('click', async () => {
-            await signOutUser();
-            window.location.href = '/';
-        });
+        const sidebarLogoutBtn = document.getElementById('sidebar-logout-btn');
+        if (sidebarLogoutBtn) {
+            sidebarLogoutBtn.addEventListener('click', async () => {
+                await signOutUser();
+                window.location.href = '/';
+            });
+        }
     </script>
     <script src="app.js" type="module"></script>
 </body>

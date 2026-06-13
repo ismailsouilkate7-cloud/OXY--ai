@@ -135,12 +135,12 @@ if (typeof window !== 'undefined') {
             document.body.appendChild(overlayEl);
 
             // Bind toolbar events
-            document.getElementById('pdf-close-btn').addEventListener('click', closeViewer);
-            document.getElementById('pdf-prev-btn').addEventListener('click', prevPage);
-            document.getElementById('pdf-next-btn').addEventListener('click', nextPage);
-            document.getElementById('pdf-zoom-in-btn').addEventListener('click', zoomIn);
-            document.getElementById('pdf-zoom-out-btn').addEventListener('click', zoomOut);
-            document.getElementById('pdf-download-btn').addEventListener('click', downloadPdf);
+            document.getElementById('pdf-close-btn')?.addEventListener('click', closeViewer);
+            document.getElementById('pdf-prev-btn')?.addEventListener('click', prevPage);
+            document.getElementById('pdf-next-btn')?.addEventListener('click', nextPage);
+            document.getElementById('pdf-zoom-in-btn')?.addEventListener('click', zoomIn);
+            document.getElementById('pdf-zoom-out-btn')?.addEventListener('click', zoomOut);
+            document.getElementById('pdf-download-btn')?.addEventListener('click', downloadPdf);
 
             // Keyboard navigation
             document.addEventListener('keydown', handleKeydown);

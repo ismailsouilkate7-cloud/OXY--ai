@@ -225,13 +225,15 @@
         window.currentAuthMode = 'login';
         
         window.openAuthModal = (mode) => {
-            document.getElementById('auth-modal').style.display = 'flex';
+            const modal = document.getElementById('auth-modal');
+            if (modal) modal.style.display = 'flex';
             window.currentAuthMode = mode;
             updateAuthUI();
         };
         
         window.closeAuthModal = () => {
-            document.getElementById('auth-modal').style.display = 'none';
+            const modal = document.getElementById('auth-modal');
+            if (modal) modal.style.display = 'none';
         };
         
         window.toggleAuthMode = () => {
@@ -241,56 +243,69 @@
         
         function updateAuthUI() {
             const isLogin = window.currentAuthMode === 'login';
-            document.getElementById('auth-title').textContent = isLogin ? 'Welcome back' : 'Create an account';
-            document.getElementById('name-group').style.display = isLogin ? 'none' : 'block';
-            if (!isLogin) document.getElementById('auth-name').setAttribute('required', 'true');
-            else document.getElementById('auth-name').removeAttribute('required');
-            
-            document.getElementById('auth-submit-text').textContent = 'Continue';
-            document.getElementById('auth-switch-text').textContent = isLogin ? "Don't have an account?" : "Already have an account?";
-            document.getElementById('auth-switch-btn').textContent = isLogin ? "Sign up" : "Log in";
-            document.getElementById('auth-error').style.display = 'none';
+            const title = document.getElementById('auth-title');
+            const nameGroup = document.getElementById('name-group');
+            const authName = document.getElementById('auth-name');
+            const submitText = document.getElementById('auth-submit-text');
+            const switchText = document.getElementById('auth-switch-text');
+            const switchBtn = document.getElementById('auth-switch-btn');
+            const errorDiv = document.getElementById('auth-error');
+            if (title) title.textContent = isLogin ? 'Welcome back' : 'Create an account';
+            if (nameGroup) nameGroup.style.display = isLogin ? 'none' : 'block';
+            if (authName) {
+                if (!isLogin) authName.setAttribute('required', 'true');
+                else authName.removeAttribute('required');
+            }
+            if (submitText) submitText.textContent = 'Continue';
+            if (switchText) switchText.textContent = isLogin ? "Don't have an account?" : "Already have an account?";
+            if (switchBtn) switchBtn.textContent = isLogin ? "Sign up" : "Log in";
+            if (errorDiv) errorDiv.style.display = 'none';
         }
         
-        document.getElementById('auth-form').addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const email = document.getElementById('auth-email').value;
-            const password = document.getElementById('auth-password').value;
-            const name = document.getElementById('auth-name').value;
-            
-            const btnText = document.getElementById('auth-submit-text');
-            const spinner = document.getElementById('auth-spinner');
-            const errorDiv = document.getElementById('auth-error');
-            
-            btnText.style.display = 'none';
-            spinner.style.display = 'inline-block';
-            errorDiv.style.display = 'none';
-            document.getElementById('auth-submit-btn').disabled = true;
-            
-            try {
-                if (window.currentAuthMode === 'signup') {
-                    await signUpUser(name, email, password);
-                } else {
-                    await signInUser(email, password);
+        const authForm = document.getElementById('auth-form');
+        if (authForm) {
+            authForm.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const email = document.getElementById('auth-email')?.value || '';
+                const password = document.getElementById('auth-password')?.value || '';
+                const name = document.getElementById('auth-name')?.value || '';
+                
+                const btnText = document.getElementById('auth-submit-text');
+                const spinner = document.getElementById('auth-spinner');
+                const errorDiv = document.getElementById('auth-error');
+                
+                if (btnText) btnText.style.display = 'none';
+                if (spinner) spinner.style.display = 'inline-block';
+                if (errorDiv) errorDiv.style.display = 'none';
+                const submitBtn = document.getElementById('auth-submit-btn');
+                if (submitBtn) submitBtn.disabled = true;
+                
+                try {
+                    if (window.currentAuthMode === 'signup') {
+                        await signUpUser(name, email, password);
+                    } else {
+                        await signInUser(email, password);
+                    }
+                } catch (error) {
+                    if (errorDiv) errorDiv.textContent = error.message.replace('Firebase: ', '');
+                    if (errorDiv) errorDiv.style.display = 'block';
+                    if (btnText) btnText.style.display = 'inline';
+                    if (spinner) spinner.style.display = 'none';
+                    if (submitBtn) submitBtn.disabled = false;
                 }
-                // Auth observer will redirect
-            } catch (error) {
-                errorDiv.textContent = error.message.replace('Firebase: ', '');
-                errorDiv.style.display = 'block';
-                btnText.style.display = 'inline';
-                spinner.style.display = 'none';
-                document.getElementById('auth-submit-btn').disabled = false;
-            }
-        });
+            });
+        }
         
-        document.getElementById('btn-google').addEventListener('click', async () => {
-            try {
-                await signInWithGoogle();
-                // Auth observer will redirect
-            } catch (error) {
-                console.error(error);
-            }
-        });
+        const googleBtn = document.getElementById('btn-google');
+        if (googleBtn) {
+            googleBtn.addEventListener('click', async () => {
+                try {
+                    await signInWithGoogle();
+                } catch (error) {
+                    console.error(error);
+                }
+            });
+        }
 
         // Redirect if already logged in
         subscribeToAuthChanges((authState) => {

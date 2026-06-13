@@ -74,7 +74,17 @@ export function subscribeToAuthChanges(callback) {
   return onAuthStateChanged(auth, async (user) => {
     if (user) {
        try {
-         const userDoc = await getDoc(doc(db, "users", user.uid));
+         let userDoc = await getDoc(doc(db, "users", user.uid));
+         if (!userDoc.exists()) {
+           await setDoc(doc(db, "users", user.uid), {
+             uid: user.uid,
+             name: user.displayName || 'User',
+             email: user.email,
+             photoURL: user.photoURL || null,
+             createdAt: new Date().toISOString()
+           });
+           userDoc = await getDoc(doc(db, "users", user.uid));
+         }
          const userData = userDoc.exists() ? userDoc.data() : { name: user.displayName, photoURL: user.photoURL };
          callback({ user, userData });
        } catch (err) {

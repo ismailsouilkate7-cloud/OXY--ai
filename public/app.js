@@ -17,6 +17,19 @@ const chatList = document.getElementById('chat-list');
 const clearChatBtn = document.getElementById('clear-chat-btn');
 const shareBtn = document.getElementById('share-btn');
 
+// === AUTHENTICATED FETCH HELPER ===
+async function apiFetch(url, options = {}) {
+    const headers = { ...options.headers };
+    if (window.currentUser && typeof window.currentUser.getIdToken === 'function') {
+        try {
+            const token = await window.currentUser.getIdToken();
+            headers['Authorization'] = `Bearer ${token}`;
+            headers['X-User-Id'] = window.currentUser.uid;
+        } catch { /* token fetch failed — proceed without auth */ }
+    }
+    return fetch(url, { ...options, headers });
+}
+
 // === LOCATION SERVICE ===
 let userLocation = (typeof vosilPersistence !== 'undefined' ? vosilPersistence.getItem('vosil_user_location') : localStorage.getItem('vosil_user_location')) || null;
 
@@ -133,7 +146,7 @@ function updateUserUI() {
     if (display) display.textContent = userName;
 }
 
-shareBtn.addEventListener('click', () => {
+if (shareBtn) shareBtn.addEventListener('click', () => {
     if (!currentSessionId) return;
     const shareLink = `${window.location.origin}/share/${currentSessionId}`;
     navigator.clipboard.writeText(shareLink).then(() => {
@@ -162,7 +175,7 @@ function updateWelcomeGreeting() {
 
 async function loadSessionsList() {
     try {
-        const res = await fetch('/api/conversations');
+        const res = await apiFetch('/api/conversations');
         if (!res.ok) return;
         const sessions = await res.json();
         chatList.innerHTML = '';
@@ -195,7 +208,7 @@ async function loadSessionsList() {
 async function deleteSession(id) {
     if (confirm("Are you sure you want to delete this conversation?")) {
         try {
-            await fetch(`/api/conversations/${id}`, { method: 'DELETE' });
+            await apiFetch(`/api/conversations/${id}`, { method: 'DELETE' });
             if (id === currentSessionId) createNewSession();
             else loadSessionsList();
         } catch (err) { console.error('Delete failed', err); }
@@ -206,7 +219,7 @@ async function renameSession(id, oldTitle) {
     const newTitle = prompt("Enter new name for this conversation:", oldTitle);
     if (newTitle && newTitle.trim() !== '') {
         try {
-            await fetch(`/api/conversations/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: newTitle.trim() }) });
+            await apiFetch(`/api/conversations/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title: newTitle.trim() }) });
             loadSessionsList();
         } catch (err) { console.error('Rename failed', err); }
     }
@@ -214,7 +227,7 @@ async function renameSession(id, oldTitle) {
 
 async function loadSession(id) {
     try {
-        const res = await fetch(`/api/conversations/${id}/messages`);
+        const res = await apiFetch(`/api/conversations/${id}/messages`);
         if (!res.ok) return;
         const messages = await res.json();
         currentSessionId = id;
@@ -240,8 +253,8 @@ function createNewSession() {
     updateWelcomeGreeting();
 }
 
-document.getElementById('new-chat-btn').addEventListener('click', createNewSession);
-clearChatBtn.addEventListener('click', () => { if (confirm("Are you sure you want to clear this chat?")) createNewSession(); });
+document.getElementById('new-chat-btn')?.addEventListener('click', createNewSession);
+if (clearChatBtn) clearChatBtn.addEventListener('click', () => { if (confirm("Are you sure you want to clear this chat?")) createNewSession(); });
 
 const sidebarOverlay = document.getElementById('sidebar-overlay');
 
@@ -264,7 +277,7 @@ function isSidebarOpen() {
 }
 
 const sidebarToggleBtn = document.getElementById('sidebar-toggle-btn');
-sidebarToggleBtn.addEventListener('click', (e) => { e.stopPropagation(); isSidebarOpen() ? closeSidebar() : openSidebar(); });
+if (sidebarToggleBtn) sidebarToggleBtn.addEventListener('click', (e) => { e.stopPropagation(); isSidebarOpen() ? closeSidebar() : openSidebar(); });
 if (mobileMenuBtn) mobileMenuBtn.addEventListener('click', (e) => { e.stopPropagation(); isSidebarOpen() ? closeSidebar() : openSidebar(); });
 // Header new chat button (minimal header)
 document.getElementById('header-new-chat-btn')?.addEventListener('click', createNewSession);
@@ -286,27 +299,27 @@ window.addEventListener('resize', () => {
 
 let attachMenuOpen = false;
 
-function toggleAttachMenu(e) { if (e) e.stopPropagation(); attachMenuOpen = !attachMenuOpen; attachMenu.classList.toggle('visible', attachMenuOpen); }
-function closeAttachMenu() { attachMenuOpen = false; attachMenu.classList.remove('visible'); }
+function toggleAttachMenu(e) { if (e) e.stopPropagation(); attachMenuOpen = !attachMenuOpen; if (attachMenu) attachMenu.classList.toggle('visible', attachMenuOpen); }
+function closeAttachMenu() { attachMenuOpen = false; if (attachMenu) attachMenu.classList.remove('visible'); }
 
-attachBtn.addEventListener('click', toggleAttachMenu);
+if (attachBtn) attachBtn.addEventListener('click', toggleAttachMenu);
 document.addEventListener('click', (e) => { if (attachMenuOpen && !attachMenuContainer.contains(e.target)) closeAttachMenu(); });
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
         if (attachMenuOpen) { closeAttachMenu(); return; }
-        if (cameraModal.style.display !== 'none') { closeCamera(); return; }
-        if (recentFilesModal.style.display !== 'none') { closeRecentFilesModal(); return; }
-        if (lightboxModal.classList.contains('open')) { closeLightbox(); return; }
+        if (cameraModal && cameraModal.style.display !== 'none') { closeCamera(); return; }
+        if (recentFilesModal && recentFilesModal.style.display !== 'none') { closeRecentFilesModal(); return; }
+        if (lightboxModal && lightboxModal.classList.contains('open')) { closeLightbox(); return; }
         if (isSidebarOpen()) closeSidebar();
     }
 });
 
-menuAddFiles.addEventListener('click', () => { closeAttachMenu(); fileInput.click(); });
-menuScreenshot.addEventListener('click', () => { closeAttachMenu(); captureScreenshot(); });
-menuCamera.addEventListener('click', () => { closeAttachMenu(); openCamera(); });
-menuRecent.addEventListener('click', () => { closeAttachMenu(); openRecentFilesModal(); });
+if (menuAddFiles) menuAddFiles.addEventListener('click', () => { closeAttachMenu(); if (fileInput) fileInput.click(); });
+if (menuScreenshot) menuScreenshot.addEventListener('click', () => { closeAttachMenu(); captureScreenshot(); });
+if (menuCamera) menuCamera.addEventListener('click', () => { closeAttachMenu(); openCamera(); });
+if (menuRecent) menuRecent.addEventListener('click', () => { closeAttachMenu(); openRecentFilesModal(); });
 
-fileInput.addEventListener('change', (e) => {
+if (fileInput) fileInput.addEventListener('change', (e) => {
     if (e.target.files.length > 0) {
         const sendBtn = document.getElementById('send-btn');
         const msgInput = document.getElementById('message-input');
@@ -451,12 +464,13 @@ function updateSendButton() {
 }
 
 let dragCounter = 0;
-chatContainer.addEventListener('dragenter', (e) => { e.preventDefault(); dragCounter++; dropZoneOverlay.classList.add('visible'); });
-chatContainer.addEventListener('dragover', (e) => e.preventDefault());
-chatContainer.addEventListener('dragleave', (e) => { e.preventDefault(); dragCounter--; if (dragCounter <= 0) { dragCounter = 0; dropZoneOverlay.classList.remove('visible'); } });
-chatContainer.addEventListener('drop', (e) => { e.preventDefault(); dragCounter = 0; dropZoneOverlay.classList.remove('visible'); if (e.dataTransfer.files.length > 0) addFilesToPending(e.dataTransfer.files); });
-document.querySelector('.chat-main')?.addEventListener('dragover', (e) => e.preventDefault());
-document.querySelector('.chat-main')?.addEventListener('drop', (e) => { e.preventDefault(); dragCounter = 0; dropZoneOverlay.classList.remove('visible'); if (e.dataTransfer.files.length > 0) addFilesToPending(e.dataTransfer.files); });
+if (chatContainer) {
+    chatContainer.addEventListener('dragenter', (e) => { e.preventDefault(); dragCounter++; if (dropZoneOverlay) dropZoneOverlay.classList.add('visible'); });
+    chatContainer.addEventListener('dragover', (e) => e.preventDefault());
+    chatContainer.addEventListener('dragleave', (e) => { e.preventDefault(); dragCounter--; if (dragCounter <= 0) { dragCounter = 0; if (dropZoneOverlay) dropZoneOverlay.classList.remove('visible'); } });
+    chatContainer.addEventListener('drop', (e) => { e.preventDefault(); dragCounter = 0; if (dropZoneOverlay) dropZoneOverlay.classList.remove('visible'); if (e.dataTransfer.files.length > 0) addFilesToPending(e.dataTransfer.files); });
+}
+document.querySelector('.chat-main')?.addEventListener('drop', (e) => { e.preventDefault(); dragCounter = 0; if (dropZoneOverlay) dropZoneOverlay.classList.remove('visible'); if (e.dataTransfer.files.length > 0) addFilesToPending(e.dataTransfer.files); });
 
 document.addEventListener('paste', async (e) => {
     const items = e.clipboardData?.items;
@@ -495,10 +509,10 @@ async function openCamera() {
     } catch (err) { cameraModal.style.display = 'none'; showToast('Camera access denied. Please allow camera permissions.', 'error'); }
 }
 
-function closeCamera() { if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); cameraStream = null; } cameraPreview.srcObject = null; cameraModal.style.display = 'none'; }
-cameraCloseBtn.addEventListener('click', closeCamera);
-cameraFlipBtn.addEventListener('click', () => { cameraFacingMode = cameraFacingMode === 'user' ? 'environment' : 'user'; if (cameraStream) cameraStream.getTracks().forEach(t => t.stop()); openCamera(); });
-cameraCaptureBtn.addEventListener('click', () => {
+function closeCamera() { if (cameraStream) { cameraStream.getTracks().forEach(t => t.stop()); cameraStream = null; } if (cameraPreview) cameraPreview.srcObject = null; if (cameraModal) cameraModal.style.display = 'none'; }
+if (cameraCloseBtn) cameraCloseBtn.addEventListener('click', closeCamera);
+if (cameraFlipBtn) cameraFlipBtn.addEventListener('click', () => { cameraFacingMode = cameraFacingMode === 'user' ? 'environment' : 'user'; if (cameraStream) cameraStream.getTracks().forEach(t => t.stop()); openCamera(); });
+if (cameraCaptureBtn) cameraCaptureBtn.addEventListener('click', () => {
     const canvas = cameraCanvas;
     canvas.width = cameraPreview.videoWidth; canvas.height = cameraPreview.videoHeight;
     const ctx = canvas.getContext('2d');
@@ -528,12 +542,12 @@ function openRecentFilesModal() {
             recentFilesBody.appendChild(item);
         });
     }
-    recentFilesModal.style.display = 'flex';
+    if (recentFilesModal) recentFilesModal.style.display = 'flex';
 }
 
-function closeRecentFilesModal() { recentFilesModal.style.display = 'none'; }
-recentFilesCloseBtn.addEventListener('click', closeRecentFilesModal);
-recentFilesModal.addEventListener('click', (e) => { if (e.target === recentFilesModal) closeRecentFilesModal(); });
+function closeRecentFilesModal() { if (recentFilesModal) recentFilesModal.style.display = 'none'; }
+if (recentFilesCloseBtn) recentFilesCloseBtn.addEventListener('click', closeRecentFilesModal);
+if (recentFilesModal) recentFilesModal.addEventListener('click', (e) => { if (e.target === recentFilesModal) closeRecentFilesModal(); });
 
 function getTimeAgo(timestamp) {
     const diff = Date.now() - timestamp;
@@ -564,11 +578,11 @@ function showLightboxImage() {
     lightboxDownload.onclick = () => { const a = document.createElement('a'); a.href = src; a.download = img.name || 'image'; a.click(); };
 }
 
-function closeLightbox() { lightboxModal.classList.remove('open'); document.body.style.overflow = ''; }
-lightboxClose.addEventListener('click', closeLightbox);
-lightboxModal.addEventListener('click', (e) => { if (e.target === lightboxModal) closeLightbox(); });
+function closeLightbox() { if (lightboxModal) lightboxModal.classList.remove('open'); document.body.style.overflow = ''; }
+if (lightboxClose) lightboxClose.addEventListener('click', closeLightbox);
+if (lightboxModal) lightboxModal.addEventListener('click', (e) => { if (e.target === lightboxModal) closeLightbox(); });
 document.addEventListener('keydown', (e) => {
-    if (!lightboxModal.classList.contains('open')) return;
+    if (!lightboxModal || !lightboxModal.classList.contains('open')) return;
     if (e.key === 'ArrowLeft' && lightboxImages.length > 1) { e.preventDefault(); lightboxCurrentIndex = (lightboxCurrentIndex - 1 + lightboxImages.length) % lightboxImages.length; showLightboxImage(); }
     if (e.key === 'ArrowRight' && lightboxImages.length > 1) { e.preventDefault(); lightboxCurrentIndex = (lightboxCurrentIndex + 1) % lightboxImages.length; showLightboxImage(); }
 });
@@ -937,16 +951,15 @@ async function sendMessage(text, inlineDataOrFiles = [], isRegenerate = false, p
     }
 }
 
-function stopGeneration() { if (abortController) { abortController.abort(); isGenerating = false; stopBtn.style.display = 'none'; regenBtn.style.display = 'flex'; saveSession(); } }
-stopBtn.addEventListener('click', stopGeneration);
-regenBtn.addEventListener('click', () => { if (currentChatHistory.length >= 2 && currentChatHistory[currentChatHistory.length - 1].sender === 'bot') { currentChatHistory.pop(); const lastUserMsg = currentChatHistory[currentChatHistory.length - 1]; renderHistory(); sendMessage(lastUserMsg.text, [], true); } });
+function stopGeneration() { if (abortController) { abortController.abort(); isGenerating = false; if (stopBtn) stopBtn.style.display = 'none'; if (regenBtn) regenBtn.style.display = 'flex'; saveSession(); } }
+if (stopBtn) stopBtn.addEventListener('click', stopGeneration);
+if (regenBtn) regenBtn.addEventListener('click', () => { if (currentChatHistory.length >= 2 && currentChatHistory[currentChatHistory.length - 1].sender === 'bot') { currentChatHistory.pop(); const lastUserMsg = currentChatHistory[currentChatHistory.length - 1]; renderHistory(); sendMessage(lastUserMsg.text, [], true); } });
 
-messageInput.addEventListener('input', function() {
-    console.log('[Input] input event fired, value:', this.value ? `"${this.value.substring(0, 30)}..."` : '(empty)');
+if (messageInput) messageInput.addEventListener('input', function() {
     this.style.height = 'auto'; this.style.height = (this.scrollHeight) + 'px'; this.style.overflowY = this.scrollHeight > 150 ? 'auto' : 'hidden'; updateSendButton();
 });
-messageInput.addEventListener('keydown', function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (!sendBtn.disabled && !isGenerating) handleSend(); } });
-sendBtn.addEventListener('click', handleSend);
+if (messageInput) messageInput.addEventListener('keydown', function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (sendBtn && !sendBtn.disabled && !isGenerating) handleSend(); } });
+if (sendBtn) sendBtn.addEventListener('click', handleSend);
 
 window.copyCode = function(btn) { const wrapper = btn.closest('.code-block-wrapper'); const code = wrapper.querySelector('code').innerText; navigator.clipboard.writeText(code).then(() => { btn.classList.add('copied'); const originalHtml = btn.innerHTML; btn.innerHTML = '<i class="fa-regular fa-clipboard"></i> Copied!'; setTimeout(() => { btn.classList.remove('copied'); btn.innerHTML = originalHtml; }, 2000); }); };
 window.copyMessage = function(text) { navigator.clipboard.writeText(text).then(() => showToast('Message copied', 'success')).catch(() => showToast('Failed to copy', 'error')); };

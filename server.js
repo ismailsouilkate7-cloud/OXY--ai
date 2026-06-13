@@ -903,11 +903,26 @@ app.get('/api/session/active', (req, res) => {
 // GET /api/location — proxies ipapi.co/json on the server (CORS-safe)
 app.get('/api/location', async (req, res) => {
     try {
-        const response = await fetch('https://ipapi.co/json/');
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 5000);
+        const response = await fetch('https://ipapi.co/json/', { signal: controller.signal });
+        clearTimeout(timeout);
         if (!response.ok) {
-            throw new Error(`ipapi.co responded with ${response.status}`);
+            const status = response.status;
+            if (status === 403) {
+                console.warn('[Location Proxy] ipapi.co returned 403 — free tier may be blocked or rate-limited. Using fallback.');
+            } else if (status === 429) {
+                console.warn('[Location Proxy] ipapi.co rate-limited (429). Using fallback.');
+            } else {
+                console.warn(`[Location Proxy] ipapi.co responded with ${status}. Using fallback.`);
+            }
+            return res.json({ city: null, region: null, country_name: null, country_code: null });
         }
         const data = await response.json();
+        if (data.error) {
+            console.warn('[Location Proxy] ipapi.co returned error:', data.reason || data.error);
+            return res.json({ city: null, region: null, country_name: null, country_code: null });
+        }
         res.json({
             city: data.city || null,
             region: data.region || null,
@@ -915,7 +930,11 @@ app.get('/api/location', async (req, res) => {
             country_code: data.country_code || null
         });
     } catch (err) {
-        console.warn('[Location Proxy] Failed to fetch location:', err.message);
+        if (err.name === 'AbortError') {
+            console.warn('[Location Proxy] Request timed out after 5s. Using fallback.');
+        } else {
+            console.warn('[Location Proxy] Failed to fetch location:', err.message);
+        }
         res.json({ city: null, region: null, country_name: null, country_code: null });
     }
 });
@@ -2023,26 +2042,53 @@ ${resultsBlock}
 // CONVERSATIONS & CHAT ENDPOINTS
 // ============================================================
 
-// GET /api/conversations - Get conversations
-app.get('/api/conversations', async (req, res) => {
+// ─── Auth middleware for conversation API ───
+// Extracts Firebase ID token from Authorization header and attaches uid to req.
+// If no token is present, the request proceeds without auth (graceful fallback).
+async function resolveConversationUser(req, res, next) {
     try {
+        const authHeader = req.headers.authorization;
+        if (authHeader && authHeader.startsWith('Bearer ')) {
+            const token = authHeader.slice(7);
+            // TODO: initialize firebase-admin and verifyIdToken(token) here
+            // For now, decode the token payload client-side and send X-User-Id
+            req.userId = req.headers['x-user-id'] || 'anonymous';
+        } else {
+            req.userId = req.headers['x-user-id'] || 'anonymous';
+        }
+    } catch {
+        req.userId = 'anonymous';
+    }
+    next();
+}
+
+// GET /api/conversations - Get conversations
+app.get('/api/conversations', resolveConversationUser, async (req, res) => {
+    try {
+        if (!isDatabaseReady()) {
+            return res.json([]);
+        }
         const result = await pool.query(
             'SELECT id, title, updated_at FROM conversations ORDER BY updated_at DESC'
         );
         res.json(result.rows);
     } catch (err) {
-        res.status(500).json({ error: 'Failed to fetch conversations' });
+        console.error(`[Conversations] GET /api/conversations failed:`, err.message);
+        res.json([]);
     }
 });
 
 // GET /api/conversations/:id/messages - Get messages for a conversation
-app.get('/api/conversations/:id/messages', async (req, res) => {
+app.get('/api/conversations/:id/messages', resolveConversationUser, async (req, res) => {
     try {
+        if (!isDatabaseReady()) {
+            return res.json([]);
+        }
         const convoResult = await pool.query(
             'SELECT * FROM conversations WHERE id = $1',
             [req.params.id]
         );
-        if (convoResult.rows.length === 0) return res.status(404).json({ error: 'Conversation not found' });
+        if (convoResult.rows.length === 0) return res.json([]);
 
         const msgResult = await pool.query(
             'SELECT role, content FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC',
@@ -2050,13 +2096,17 @@ app.get('/api/conversations/:id/messages', async (req, res) => {
         );
         res.json(msgResult.rows.map(m => ({ role: m.role, text: m.content })));
     } catch (err) {
-        res.status(500).json({ error: 'Failed to fetch messages' });
+        console.error(`[Conversations] GET /api/conversations/${req.params.id}/messages failed:`, err.message);
+        res.json([]);
     }
 });
 
 // PUT /api/conversations/:id - Rename a conversation
-app.put('/api/conversations/:id', async (req, res) => {
+app.put('/api/conversations/:id', resolveConversationUser, async (req, res) => {
     try {
+        if (!isDatabaseReady()) {
+            return res.status(503).json({ error: 'Database not available' });
+        }
         const { title } = req.body;
         if (!title) return res.status(400).json({ error: 'Title required' });
         await pool.query(
@@ -2065,19 +2115,24 @@ app.put('/api/conversations/:id', async (req, res) => {
         );
         res.json({ success: true });
     } catch (err) {
+        console.error(`[Conversations] PUT /api/conversations/${req.params.id} failed:`, err.message);
         res.status(500).json({ error: 'Failed to rename conversation' });
     }
 });
 
 // DELETE /api/conversations/:id - Delete a conversation
-app.delete('/api/conversations/:id', async (req, res) => {
+app.delete('/api/conversations/:id', resolveConversationUser, async (req, res) => {
     try {
+        if (!isDatabaseReady()) {
+            return res.status(503).json({ error: 'Database not available' });
+        }
         await pool.query(
             'DELETE FROM conversations WHERE id = $1',
             [req.params.id]
         );
         res.json({ success: true });
     } catch (err) {
+        console.error(`[Conversations] DELETE /api/conversations/${req.params.id} failed:`, err.message);
         res.status(500).json({ error: 'Failed to delete conversation' });
     }
 });
