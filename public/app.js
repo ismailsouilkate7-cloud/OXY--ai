@@ -173,18 +173,63 @@ function updateWelcomeGreeting() {
     } catch (e) { /* no-op */ }
 }
 
+function showChatListLoading() {
+    chatList.innerHTML = '<div class="chat-list-loader"><span class="loading-spinner-xs"></span> Loading chats...</div>';
+}
+
+function showChatListEmpty() {
+    chatList.innerHTML = '<div class="chat-list-empty"><i class="fa-solid fa-comment-slash"></i><span>No chats yet</span></div>';
+}
+
+async function saveSessionToDb() {
+    if (!currentSessionId) return;
+    try {
+        // Build messages from currentChatHistory for DB storage
+        const messages = currentChatHistory.map(msg => ({
+            role: msg.sender === 'user' ? 'user' : 'model',
+            content: msg.text || ''
+        }));
+        
+        // Only save if we have messages
+        if (messages.length === 0) return;
+        
+        // Get first user message as title (truncate to first 80 chars)
+        const firstUserMsg = messages.find(m => m.role === 'user');
+        const title = firstUserMsg 
+            ? firstUserMsg.content.replace(/[\n\r]+/g, ' ').trim().substring(0, 80) || 'New Chat'
+            : 'New Chat';
+        
+        const res = await apiFetch('/api/conversations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id: currentSessionId, title, messages })
+        });
+        if (!res.ok) console.warn('[Save] Failed to save conversation');
+    } catch (err) {
+        console.warn('[Save] Error saving conversation:', err.message);
+    }
+}
+
 async function loadSessionsList() {
+    showChatListLoading();
     try {
         const res = await apiFetch('/api/conversations');
-        if (!res.ok) return;
+        if (!res.ok) {
+            showChatListEmpty();
+            return;
+        }
         const sessions = await res.json();
         chatList.innerHTML = '';
+        if (!sessions || sessions.length === 0) {
+            showChatListEmpty();
+            return;
+        }
         sessions.forEach(session => {
             const div = document.createElement('div');
             div.className = `chat-item ${session.id === currentSessionId ? 'active' : ''}`;
             const titleSpan = document.createElement('span');
             titleSpan.className = 'chat-item-title';
-            titleSpan.textContent = session.title;
+            titleSpan.textContent = session.title || 'New Chat';
             titleSpan.onclick = () => loadSession(session.id);
             const actionsDiv = document.createElement('div');
             actionsDiv.className = 'chat-item-actions';
@@ -202,8 +247,12 @@ async function loadSessionsList() {
             div.appendChild(actionsDiv);
             chatList.appendChild(div);
         });
-    } catch (err) { console.error('Failed to load sessions', err); }
+    } catch (err) { 
+        console.error('Failed to load sessions', err);
+        showChatListEmpty();
+    }
 }
+REPLACE
 
 async function deleteSession(id) {
     if (confirm("Are you sure you want to delete this conversation?")) {
@@ -239,7 +288,11 @@ async function loadSession(id) {
     } catch (err) { console.error('Failed to load session', err); }
 }
 
-function saveSession() { loadSessionsList(); }
+function saveSession() { 
+    // Save to DB in background (non-blocking)
+    saveSessionToDb();
+    loadSessionsList(); 
+}
 
 function createNewSession() {
     currentSessionId = 'sess_' + Math.random().toString(36).substr(2, 9);

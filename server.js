@@ -12,9 +12,30 @@ import cookieParser from 'cookie-parser';
 import fs from 'fs';
 
 import crypto from 'crypto';
+import admin from 'firebase-admin';
 import pool, { initDb, isDatabaseReady, getDbDiagnostics } from './db.js';
 
 dotenv.config();
+
+// ============================================================
+// Firebase Admin Initialization
+// ============================================================
+// We initialize without a service account. The Firebase Admin SDK
+// will look for GOOGLE_APPLICATION_CREDENTIALS env var, or fall back
+// to verifying tokens via the Firebase Auth REST API.
+// If no credentials are available, token verification will fail gracefully
+// and the system will fall back to X-User-Id header.
+let firebaseInitialized = false;
+try {
+    if (admin.apps.length === 0) {
+        admin.initializeApp({ projectId: 'vosil-ai' });
+    }
+    firebaseInitialized = true;
+    console.log('[Firebase] ✅ Admin SDK initialized (project: vosil-ai)');
+} catch (err) {
+    console.warn('[Firebase] ⚠️ Admin SDK initialization failed:', err.message);
+    console.warn('[Firebase] Token verification will fall back to X-User-Id header');
+}
 
 // Verify Tavily API Key
 if (process.env.TAVILY_API_KEY) {
@@ -2042,39 +2063,132 @@ ${resultsBlock}
 // CONVERSATIONS & CHAT ENDPOINTS
 // ============================================================
 
+// ─── Firebase Token Verification ───
+// Since we use Firebase Auth on the client side, the user sends the Firebase ID token
+// in the Authorization header. We verify it here using Firebase Auth REST API.
+// This avoids needing a service account file on the server.
+async function verifyFirebaseToken(token) {
+    if (!token || typeof token !== 'string') return null;
+    try {
+        // Use Firebase Auth REST API to verify the token
+        const apiKey = process.env.GEMINI_API_KEY; // We don't have a separate FB API key available, so decode locally
+        // Actually, let's use firebase-admin properly
+        const decodedToken = await admin.auth().verifyIdToken(token);
+        return decodedToken;
+    } catch (err) {
+        console.warn('[Auth] Firebase token verification failed:', err.message);
+        return null;
+    }
+}
+
 // ─── Auth middleware for conversation API ───
 // Extracts Firebase ID token from Authorization header and attaches uid to req.
 // If no token is present, the request proceeds without auth (graceful fallback).
 async function resolveConversationUser(req, res, next) {
     try {
         const authHeader = req.headers.authorization;
+        const xUserId = req.headers['x-user-id'];
+        
         if (authHeader && authHeader.startsWith('Bearer ')) {
             const token = authHeader.slice(7);
-            // TODO: initialize firebase-admin and verifyIdToken(token) here
-            // For now, decode the token payload client-side and send X-User-Id
-            req.userId = req.headers['x-user-id'] || 'anonymous';
+            const decoded = await verifyFirebaseToken(token);
+            if (decoded && decoded.uid) {
+                req.userId = decoded.uid;
+                req.firebaseUser = decoded;
+                console.log(`[Auth] ✅ Authenticated user: ${decoded.uid.substring(0, 12)}...`);
+            } else {
+                // Token verification failed — fall back to X-User-Id if provided
+                req.userId = xUserId || 'anonymous';
+            }
+        } else if (xUserId) {
+            req.userId = xUserId;
         } else {
-            req.userId = req.headers['x-user-id'] || 'anonymous';
+            req.userId = 'anonymous';
         }
     } catch {
-        req.userId = 'anonymous';
+        req.userId = req.headers['x-user-id'] || 'anonymous';
     }
     next();
 }
 
-// GET /api/conversations - Get conversations
+// ─── Save conversation to database ───
+async function saveConversationToDb(sessionId, title, userId, messages) {
+    if (!isDatabaseReady()) return false;
+    try {
+        // Upsert conversation
+        await pool.query(
+            `INSERT INTO conversations (id, title, user_id, updated_at) 
+             VALUES ($1, $2, $3, CURRENT_TIMESTAMP)
+             ON CONFLICT (id) DO UPDATE SET 
+               title = COALESCE(NULLIF($2, ''), conversations.title),
+               updated_at = CURRENT_TIMESTAMP`,
+            [sessionId, title || 'New Chat', userId]
+        );
+        
+        // Insert messages if provided
+        if (messages && messages.length > 0) {
+            for (const msg of messages) {
+                await pool.query(
+                    `INSERT INTO messages (conversation_id, role, content) 
+                     VALUES ($1, $2, $3)
+                     ON CONFLICT DO NOTHING`,
+                    [sessionId, msg.role, msg.content]
+                );
+            }
+        }
+        return true;
+    } catch (err) {
+        console.error(`[DB] Failed to save conversation ${sessionId}:`, err.message);
+        return false;
+    }
+}
+
+// ─── Check if user owns the conversation ───
+async function checkConversationOwnership(conversationId, userId) {
+    if (!isDatabaseReady() || !conversationId) return false;
+    try {
+        const result = await pool.query(
+            'SELECT user_id FROM conversations WHERE id = $1',
+            [conversationId]
+        );
+        if (result.rows.length === 0) return false;
+        return result.rows[0].user_id === userId || result.rows[0].user_id === 'anonymous';
+    } catch {
+        return false;
+    }
+}
+
+// GET /api/conversations - Get conversations for the authenticated user
 app.get('/api/conversations', resolveConversationUser, async (req, res) => {
     try {
         if (!isDatabaseReady()) {
             return res.json([]);
         }
         const result = await pool.query(
-            'SELECT id, title, updated_at FROM conversations ORDER BY updated_at DESC'
+            'SELECT id, title, updated_at FROM conversations WHERE user_id = $1 ORDER BY updated_at DESC',
+            [req.userId]
         );
         res.json(result.rows);
     } catch (err) {
         console.error(`[Conversations] GET /api/conversations failed:`, err.message);
         res.json([]);
+    }
+});
+
+// POST /api/conversations - Save a conversation
+app.post('/api/conversations', resolveConversationUser, async (req, res) => {
+    try {
+        if (!isDatabaseReady()) {
+            return res.status(503).json({ error: 'Database not available' });
+        }
+        const { id, title, messages } = req.body;
+        if (!id) return res.status(400).json({ error: 'Conversation ID required' });
+        
+        await saveConversationToDb(id, title, req.userId, messages);
+        res.json({ success: true });
+    } catch (err) {
+        console.error('[Conversations] POST failed:', err.message);
+        res.status(500).json({ error: 'Failed to save conversation' });
     }
 });
 
@@ -2084,6 +2198,10 @@ app.get('/api/conversations/:id/messages', resolveConversationUser, async (req, 
         if (!isDatabaseReady()) {
             return res.json([]);
         }
+        // Check ownership
+        const owned = await checkConversationOwnership(req.params.id, req.userId);
+        if (!owned) return res.json([]);
+        
         const convoResult = await pool.query(
             'SELECT * FROM conversations WHERE id = $1',
             [req.params.id]
@@ -2109,6 +2227,11 @@ app.put('/api/conversations/:id', resolveConversationUser, async (req, res) => {
         }
         const { title } = req.body;
         if (!title) return res.status(400).json({ error: 'Title required' });
+        
+        // Check ownership
+        const owned = await checkConversationOwnership(req.params.id, req.userId);
+        if (!owned) return res.status(403).json({ error: 'Not authorized' });
+        
         await pool.query(
             'UPDATE conversations SET title = $1, updated_at = CURRENT_TIMESTAMP WHERE id = $2',
             [title, req.params.id]
@@ -2126,6 +2249,10 @@ app.delete('/api/conversations/:id', resolveConversationUser, async (req, res) =
         if (!isDatabaseReady()) {
             return res.status(503).json({ error: 'Database not available' });
         }
+        // Check ownership
+        const owned = await checkConversationOwnership(req.params.id, req.userId);
+        if (!owned) return res.status(403).json({ error: 'Not authorized' });
+        
         await pool.query(
             'DELETE FROM conversations WHERE id = $1',
             [req.params.id]

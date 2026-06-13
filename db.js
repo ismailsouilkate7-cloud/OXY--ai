@@ -162,14 +162,25 @@ async function tryConnectAndInit(parsed) {
         // Schema init
         await client.query('CREATE EXTENSION IF NOT EXISTS "pgcrypto";');
 
+        // Create conversations table with user_id column
         await client.query(`
             CREATE TABLE IF NOT EXISTS conversations (
                 id VARCHAR(255) PRIMARY KEY,
                 title VARCHAR(255) NOT NULL,
+                user_id VARCHAR(255) DEFAULT 'anonymous',
                 created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
             );
         `);
+
+        // Create index on user_id for faster queries
+        try {
+            await client.query(`
+                CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations(user_id);
+            `);
+        } catch (e) {
+            // Ignore
+        }
 
         await client.query(`
             CREATE TABLE IF NOT EXISTS messages (
