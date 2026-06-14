@@ -970,6 +970,8 @@ const ALLOWED_MIMES = new Set([
     'application/json', 'text/json',
     'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
     'application/zip', 'application/x-zip-compressed',
+    // Videos
+    'video/mp4', 'video/quicktime', 'video/webm', 'video/x-msvideo',
     // Code files
     'application/javascript', 'text/javascript', 'text/html', 'text/css',
     'text/x-python', 'text/x-java-source', 'text/x-c', 'text/x-c++src',
@@ -1742,6 +1744,85 @@ function isTextDocument(mimetype, originalname) {
     return mimetype.startsWith('text/') || mimetype === 'application/json' || mimetype === 'application/javascript' || textExtensions.includes(ext);
 }
 
+// Video duration validation — parses MP4/MOV/WebM headers to extract duration
+function getVideoDuration(buffer) {
+    try {
+        if (buffer.length < 12) return null;
+
+        // Detect ISO BMFF (MP4/MOV) — check for ftyp or other box header
+        const boxType = buffer.toString('ascii', 4, 8);
+        if (['ftyp', 'moov', 'mdat', 'free', 'skip', 'wide', 'pnot'].includes(boxType)) {
+            return parseIsoBmffDuration(buffer);
+        }
+
+        return null;
+    } catch {
+        return null;
+    }
+}
+
+function parseIsoBmffDuration(buffer) {
+    let offset = 0;
+    while (offset + 8 <= buffer.length) {
+        const boxSize = buffer.readUInt32BE(offset);
+        const type = buffer.toString('ascii', offset + 4, offset + 8);
+        if (boxSize === 0) break;
+        if (boxSize < 8) { offset += 8; continue; }
+        if (type === 'moov') {
+            return parseMoovBox(buffer, offset + 8, offset + boxSize);
+        }
+        offset += boxSize;
+    }
+    return null;
+}
+
+function parseMoovBox(buffer, start, end) {
+    let offset = start;
+    while (offset + 8 <= end) {
+        const boxSize = buffer.readUInt32BE(offset);
+        const type = buffer.toString('ascii', offset + 4, offset + 8);
+        if (boxSize === 0) break;
+        if (boxSize < 8) { offset += 8; continue; }
+        if (type === 'mvhd') {
+            return parseMvhdBox(buffer, offset + 8, offset + boxSize);
+        }
+        offset += boxSize;
+    }
+    return null;
+}
+
+function parseMvhdBox(buffer, start, end) {
+    if (start + 4 > end) return null;
+    const version = buffer.readUInt8(start);
+    if (version === 0) {
+        if (start + 20 > end) return null;
+        const timescale = buffer.readUInt32BE(start + 12);
+        const duration = buffer.readUInt32BE(start + 16);
+        if (timescale > 0) return duration / timescale;
+    } else if (version === 1) {
+        if (start + 28 > end) return null;
+        const timescale = buffer.readUInt32BE(start + 20);
+        const duration = Number(buffer.readBigUInt64BE(start + 24));
+        if (timescale > 0) return duration / timescale;
+    }
+    return null;
+}
+
+function validateVideoFile(file) {
+    if (file.mimetype && file.mimetype.startsWith('video/')) {
+        if (file.size > 50 * 1024 * 1024) {
+            return 'Video size must be less than 50MB.';
+        }
+        if (file.buffer && file.buffer.length > 0) {
+            const duration = getVideoDuration(file.buffer);
+            if (duration !== null && duration > 40) {
+                return 'Video must be 40 seconds or less.';
+            }
+        }
+    }
+    return null;
+}
+
 async function buildFileParts(files, client = null) {
     const parts = [];
     const fileDescriptions = [];
@@ -1782,6 +1863,10 @@ app.post('/api/upload', upload.array('files', 10), async (req, res) => {
     try {
         const files = req.files || [];
         if (files.length === 0) return res.status(400).json({ error: 'No files uploaded' });
+        for (const file of files) {
+            const error = validateVideoFile(file);
+            if (error) return res.status(400).json({ error });
+        }
         const uploadedFiles = [];
         for (const file of files) {
             const fileId = uuidv4();
@@ -1800,6 +1885,15 @@ app.post('/api/upload', upload.array('files', 10), async (req, res) => {
 app.post('/api/preprocess-files', upload.array('files', 10), async (req, res) => {
     const files = req.files || [];
     if (files.length === 0) return res.status(400).json({ error: 'No files uploaded' });
+
+    for (const file of files) {
+        const error = validateVideoFile(file);
+        if (error) {
+            safeSseWrite(res, `data: ${JSON.stringify({ error, done: true })}\n\n`);
+            safeSseEnd(res);
+            return;
+        }
+    }
 
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
@@ -2290,6 +2384,12 @@ app.post('/api/chat', upload.array('files', 10), async (req, res) => {
         const temperature = (!isNaN(rawTemp) && rawTemp >= 0 && rawTemp <= 2) ? rawTemp : 0.7;
         const files = req.files || [];
 
+        // Validate video files before processing
+        for (const file of files) {
+            const error = validateVideoFile(file);
+            if (error) return res.status(400).json({ error });
+        }
+
         // Support both raw file uploads and pre-processed file references
         let processedFiles = [];
         if (req.body.processedFiles) {
@@ -2491,6 +2591,23 @@ app.post('/api/chat', upload.array('files', 10), async (req, res) => {
                             if (!/^[A-Za-z0-9+/=]*$/.test(item.data)) {
                                 console.log('[Chat] ⚠️ Skipping inlineData: data contains invalid base64 characters');
                                 continue;
+                            }
+
+                            // Server-side video duration validation for inlineData
+                            if (item.mimeType && item.mimeType.startsWith('video/')) {
+                                const decodedSize = Math.ceil(item.data.length * 0.75);
+                                if (decodedSize > 50 * 1024 * 1024) {
+                                    safeSseWrite(res, `data: ${JSON.stringify({ error: 'Video size must be less than 50MB.' })}\n\n`);
+                                    safeSseEnd(res);
+                                    return;
+                                }
+                                const videoBuffer = Buffer.from(item.data, 'base64');
+                                const duration = getVideoDuration(videoBuffer);
+                                if (duration !== null && duration > 40) {
+                                    safeSseWrite(res, `data: ${JSON.stringify({ error: 'Video must be 40 seconds or less.' })}\n\n`);
+                                    safeSseEnd(res);
+                                    return;
+                                }
                             }
                             
                             console.log('[Chat] ✓ inlineData valid - mimeType:', item.mimeType, 'size:', item.data.length, 'bytes');

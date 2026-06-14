@@ -399,8 +399,29 @@ async function uploadFiles(files) {
     return true;
 }
 
-function addFilesToPending(fileList) {
-    const maxSize = 20 * 1024 * 1024; // 20MB limit
+function getVideoDuration(file) {
+    return new Promise((resolve, reject) => {
+        const video = document.createElement('video');
+        video.preload = 'metadata';
+        const url = URL.createObjectURL(file);
+        video.src = url;
+        video.onloadedmetadata = () => {
+            URL.revokeObjectURL(url);
+            resolve(video.duration);
+        };
+        video.onerror = () => {
+            URL.revokeObjectURL(url);
+            reject(new Error('Failed to load video metadata'));
+        };
+        setTimeout(() => {
+            URL.revokeObjectURL(url);
+            reject(new Error('Video metadata load timed out'));
+        }, 10000);
+    });
+}
+
+async function addFilesToPending(fileList) {
+    const maxSize = 50 * 1024 * 1024;
     const maxTotal = 10;
     const allowedExtensions = ['.pdf', '.jpg', '.jpeg', '.png', '.gif', '.webp', '.mp4', '.mov', '.webm'];
     const errors = [];
@@ -413,13 +434,50 @@ function addFilesToPending(fileList) {
         if (pendingFiles.length >= maxTotal) { errors.push(`Maximum ${maxTotal} files allowed`); break; }
         if (file.size > maxSize) { 
             const sizeMB = (file.size / (1024 * 1024)).toFixed(1);
-            errors.push(`"${file.name}" is too large (${sizeMB}MB, max 20MB)`); 
+            if (file.type.startsWith('video/')) {
+                errors.push('Video size must be less than 50MB.'); 
+            } else {
+                errors.push(`"${file.name}" is too large (${sizeMB}MB, max 50MB)`); 
+            }
             continue; 
         }
         if (file.size === 0) { errors.push(`"${file.name}" is empty`); continue; }
         const id = ++fileIdCounter;
         const preview = generatePreview(file);
-        pendingFiles.push({ id, file, preview, name: file.name, size: file.size, type: file.type });
+        const fileObj = { id, file, preview, name: file.name, size: file.size, type: file.type, duration: null };
+
+        if (file.type.startsWith('video/')) {
+            pendingFiles.push({ ...fileObj, checkingDuration: true });
+            updateFilePreviewStrip();
+            updateSendButton();
+
+            try {
+                const duration = await getVideoDuration(file);
+                const idx = pendingFiles.findIndex(f => f.id === id);
+                if (idx === -1) continue;
+
+                if (duration > 40) {
+                    pendingFiles.splice(idx, 1);
+                    showToast('Video must be 40 seconds or less.', 'warning');
+                    updateFilePreviewStrip();
+                    updateSendButton();
+                    continue;
+                }
+
+                pendingFiles[idx].duration = duration;
+                pendingFiles[idx].checkingDuration = false;
+                updateFilePreviewStrip();
+                updateSendButton();
+            } catch (err) {
+                const idx = pendingFiles.findIndex(f => f.id === id);
+                if (idx !== -1) {
+                    pendingFiles[idx].checkingDuration = false;
+                    updateFilePreviewStrip();
+                }
+            }
+        } else {
+            pendingFiles.push(fileObj);
+        }
     }
     if (errors.length > 0) showToast(errors[0], 'warning');
     updateFilePreviewStrip();
@@ -488,7 +546,14 @@ function updateFilePreviewStrip() {
             if (f.type.startsWith('image/')) {
                 thumbHtml = `<img src="${f.preview}" class="preview-thumb" alt="" loading="lazy">`;
             } else if (f.type.startsWith('video/')) {
-                thumbHtml = `<video src="${f.preview}" class="preview-thumb"></video><div class="video-preview-overlay"><i class="fa-solid fa-play"></i></div>`;
+                let durationHtml = '';
+                if (f.checkingDuration) {
+                    durationHtml = '<span class="preview-duration">Checking…</span>';
+                } else if (f.duration != null) {
+                    const secs = Math.round(f.duration);
+                    durationHtml = `<span class="preview-duration">${secs}s</span>`;
+                }
+                thumbHtml = `<video src="${f.preview}" class="preview-thumb"></video><div class="video-preview-overlay"><i class="fa-solid fa-play"></i></div>${durationHtml}`;
             } else {
                 thumbHtml = `<div class="preview-icon-bg" style="background:${color}20;color:${color}"><i class="fa-solid ${icon}"></i></div>`;
             }
@@ -498,7 +563,7 @@ function updateFilePreviewStrip() {
         return `<div class="preview-item" data-id="${f.id}">
             <button class="preview-remove" onclick="removePendingFile(${f.id})"><i class="fa-solid fa-xmark"></i></button>
             <div class="preview-thumb-wrap">${thumbHtml}</div>
-            <div class="preview-info"><span class="preview-name">${f.name.length > 20 ? f.name.substring(0, 18) + '…' : f.name}</span><span class="preview-size">${size}</span></div>
+            <div class="preview-info"><span class="preview-name">${f.name.length > 20 ? f.name.substring(0, 18) + '…' : f.name}</span><span class="preview-size">${f.type.startsWith('video/') && f.duration != null ? Math.round(f.duration) + 's · ' + size : size}</span></div>
         </div>`;
     }).join('');
 }
@@ -512,7 +577,8 @@ function setUploadingState(uploading) {
 function updateSendButton() {
     const hasText = messageInput.value.trim().length > 0;
     const hasFiles = pendingFiles.length > 0;
-    sendBtn.disabled = !(hasText || hasFiles) || isUploading || isProcessingFiles;
+    const checkingVideo = pendingFiles.some(f => f.checkingDuration);
+    sendBtn.disabled = !(hasText || hasFiles) || isUploading || isProcessingFiles || checkingVideo;
 }
 
 let dragCounter = 0;
