@@ -1088,37 +1088,18 @@ function detectAmbiguity(message) {
     const msg = message.toLowerCase().trim();
     const reasons = [];
     const clarifications = [];
-    const timeAmbiguous = ['upcoming', 'recent', 'latest', 'current', 'today', 'now'].filter(w => msg.includes(w));
-    if (timeAmbiguous.length > 0 && !msg.match(/\b\d{4}\b/)) {
+    // Only flag time ambiguity if the message is explicitly about scheduling or events
+    const timeAmbiguous = ['upcoming', 'recent', 'latest', 'current'].filter(w => msg.includes(w));
+    const isTimeSensitiveQuery = msg.match(/\b(schedule|event|happening|deadline|appointment)\b/i);
+    if (timeAmbiguous.length > 0 && isTimeSensitiveQuery && !msg.match(/\b\d{4}\b/)) {
         reasons.push('time context missing');
-        clarifications.push('Could you specify the time period you\'re interested in?');
+        clarifications.push('Could you specify the time period?');
     }
     const locationIndicated = msg.match(/\b(?:in|at|from|for)\s+(?:my|our|the)\s+(?:area|region|country|city)\b/i);
     const locationMissing = msg.match(/\b(?:weather|news|price|population|event)\b/i);
     if (locationIndicated && locationMissing) {
         reasons.push('location context needed');
         clarifications.push('What location are you referring to?');
-    }
-    const eventWords = ['exam', 'score', 'result', 'price', 'schedule'];
-    const hasEventWord = eventWords.some(w => msg.includes(w));
-    const missingContext = msg.match(new RegExp('\\b\\d+\\/\\d+\\b'));
-    if (hasEventWord && missingContext && !msg.match(/(?:academic|school|year|season)/i)) {
-        reasons.push('numeric reference lacks context');
-        clarifications.push(`"Does "${missingContext[0]}" refer to an academic year, a ratio, or something else?`);
-    }
-    const sportsTeams = ['real', 'barca', 'united', 'city', 'arsenal', 'liverpool', 'manchester'];
-    const hasSportsTeam = sportsTeams.some(t => msg.includes(t));
-    const hasSportsContext = msg.match(/(?:score|match|game|result|vs|against)/i);
-    if (hasSportsTeam && !hasSportsContext) {
-        reasons.push('potentially missing sports context');
-        clarifications.push('Are you asking about sports? If so, which sport?');
-    }
-    if (msg.match(/^(?:it|they|this|that|what|how|why)\b/i) && msg.split(/\s+/).length < 8) {
-        const hasHistory = msg.match(/^(?:it|they|this|that|what|how|why)\s+(?:is|are|was|were|did|does|do|can|will|would|should)/i);
-        if (hasHistory) {
-            reasons.push('reference to previous context unclear');
-            clarifications.push('Could you clarify what you\'re referring to?');
-        }
     }
     return { isAmbiguous: reasons.length > 0, reasons: [...new Set(reasons)], clarifications: [...new Set(clarifications)] };
 }
@@ -1166,8 +1147,10 @@ function getAIClient(keyIndex) {
 
 const SYSTEM_PROMPT = `You are VOSIL created by Ismail Souilkate.
 kfch khasek tkon :
-   -friendly bzaf katehder b7al chi sadi9.
-   -katste3mel "sat, sadi9i, frero, sahbi" bach t3iyet luser 
+   -direct bzaf: jawb 3la su2al direkt, matkhrjch f lkharij.
+   -ma t3awedch l'utilisateur, ma tkhaliwch i7ess belli katecho.
+   -friendly wlkn b7al chi sadi9 i3tik sa7, mashi b7al chi sahbi kaydir l'crush.
+   -matste3mlch "sat, sadi9i, frero, sahbi" f kol joumla. ist3melhom b7diri ghir f waqt normal.
    -katjaweb 3la ay su2al kifma kan.
    -katjaweb baylogha hder m3ak biha luser.
    -fach yehder maak bdarija dekhel maaha chiwa dial fr mat3ie9ch.
@@ -1222,7 +1205,7 @@ QUALITY:
 === ACCURACY RULES ===
 - NEVER invent facts, numbers, dates, or sources.
 - If unsure, clearly say "I don't know" or "not sure".
-- Ask clarification if the user request is ambiguous.
+- ONLY ask clarification if the user's request is genuinely impossible to answer without more info.
 - Prioritize correctness over confidence.
 
 === CORE BEHAVIOR ===
@@ -1240,11 +1223,13 @@ QUALITY:
 
 === RESPONSE STYLE ===
 - Hder b7al insan 3adi, mashi robot
-- Khesser lhedra m3a luser (casual, smooth)
+- Ma tjiibch f la toul, jawb direkt w khrej
+- NEVER echo or repeat the user's question back to them.
+- NEVER repeat the same phrase or greeting across messages.
+- If you catch yourself using the same opening pattern as a previous reply, change it immediately.
 - Use emojis 😊🔥 when it fits naturally
 - Match the user's language (Darija, French, English, Arabic).
-- Keep answers simple and natural.
-- Use short answers when possible.
+- Keep answers simple, natural, and short.
 - Expand only when the user requests detail.
 
 === FORMATTING RULES ===
@@ -1266,6 +1251,11 @@ When the answer is long:
 - Start with a direct answer first.
 - Then organize explanation into sections.
 - End with a short optional closing or question if natural.
+
+=== LOOP PREVENTION ===
+- If the user sends a short or vague message (e.g., "bghit sahel", "hna", "walu"), do NOT respond with confusion or repetition. Give a direct helpful answer or ask one clear question and wait.
+- NEVER respond with the same type of phrase more than once per conversation turn.
+- If you don't understand, say what you understood and ask ONE clarifying question max.
 
 === USER EXPERIENCE ===
 - Keep tone casual, smooth, and helpful.
@@ -2454,11 +2444,14 @@ app.post('/api/chat', upload.array('files', 10), async (req, res) => {
             }
         }
 
-        // Only check ambiguity when NO web search intent was detected
+        // Check ambiguity only when NO web search intent was detected
+        // Instead of hard-blocking, inject ambiguity context for the AI to handle naturally
+        let ambiguityContext = '';
         if (!searchQuery) {
             const ambiguityResult = detectAmbiguity(message);
             if (ambiguityResult.isAmbiguous && ambiguityResult.clarifications.length > 0) {
-                return res.json({ text: ambiguityResult.clarifications[0], metadata: { type: 'clarification', ambiguity: ambiguityResult } });
+                ambiguityContext = `\n\n[AMBIGUITY NOTE: The user's query may need clarification: ${ambiguityResult.reasons.join(', ')}. If needed, ask ONE short question. Otherwise, just answer directly based on context.]`;
+                console.log(`[Ambiguity] Detected: ${ambiguityResult.reasons.join(', ')} — injected as context instead of blocking`);
             }
         }
 
@@ -2510,7 +2503,7 @@ app.post('/api/chat', upload.array('files', 10), async (req, res) => {
         if (searchContext) {
             console.log(`[WEB] injected into prompt | ${searchContext.length} chars in system instruction`);
         }
-        let currentSystemPrompt = `${SYSTEM_PROMPT}${dateContext}\n\nThe user is named "${userName || 'User'}".${locationContext}${genderContext}${searchSystemContext}`;
+        let currentSystemPrompt = `${SYSTEM_PROMPT}${dateContext}\n\nThe user is named "${userName || 'User'}".${locationContext}${genderContext}${searchSystemContext}${ambiguityContext}`;
         
         if (isModelQuery) {
             currentSystemPrompt += `\n\n>>> CRITICAL FIX RULES: NEVER answer model/version questions (like "latest Claude", "newest GPT") from memory. NEVER invent release dates (especially future dates like 2026). If a model name + year is requested, verify via web search results first. If generated date > ${currentYear}, it is INVALID. Web search results ALWAYS override training knowledge. <<<`;
