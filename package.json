@@ -28,6 +28,9 @@
     "uuid": "^14.0.0",
     "ws": "^8.21.0"
   },
+  "overrides": {
+    "jose": "^5.10.0"
+  },
   "devDependencies": {
     "@types/node": "^22.15.17",
     "@types/react": "^19.1.2",

@@ -12,10 +12,8 @@ import cookieParser from 'cookie-parser';
 import fs from 'fs';
 
 import crypto from 'crypto';
-import { createRequire } from 'module';
-const _require = createRequire(import.meta.url);
-const { initializeApp, getApps, cert } = _require('firebase-admin/app');
-const { getAuth } = _require('firebase-admin/auth');
+import { initializeApp, getApps, cert } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
 import pool, { initDb, isDatabaseReady, getDbDiagnostics } from './db.js';
 
 dotenv.config();
