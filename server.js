@@ -12,7 +12,8 @@ import cookieParser from 'cookie-parser';
 import fs from 'fs';
 
 import crypto from 'crypto';
-import admin from 'firebase-admin';
+import { initializeApp, getApps, cert } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
 import pool, { initDb, isDatabaseReady, getDbDiagnostics } from './db.js';
 
 dotenv.config();
@@ -20,18 +21,35 @@ dotenv.config();
 // ============================================================
 // Firebase Admin Initialization
 // ============================================================
-// We initialize without a service account. The Firebase Admin SDK
-// will look for GOOGLE_APPLICATION_CREDENTIALS env var, or fall back
-// to verifying tokens via the Firebase Auth REST API.
-// If no credentials are available, token verification will fail gracefully
-// and the system will fall back to X-User-Id header.
-let firebaseInitialized = false;
+// Locally, we can rely on Application Default Credentials (GOOGLE_APPLICATION_CREDENTIALS).
+// On Vercel (no ADC), we need explicit service account credentials via env vars.
+//
+// Required env vars for Vercel (get from Firebase Console > Project Settings > Service Accounts):
+//   FIREBASE_CLIENT_EMAIL — the service account's client_email
+//   FIREBASE_PRIVATE_KEY — the service account's private_key (with real \n, not literal)
+//
+// Optional:
+//   FIREBASE_PROJECT_ID — defaults to 'vosil-ai'
 try {
-    if (admin.apps.length === 0) {
-        admin.initializeApp({ projectId: 'vosil-ai' });
+    if (getApps().length === 0) {
+        const firebaseClientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+        const firebasePrivateKey = process.env.FIREBASE_PRIVATE_KEY;
+        const firebaseProjectId = process.env.FIREBASE_PROJECT_ID || 'vosil-ai';
+
+        if (firebaseClientEmail && firebasePrivateKey) {
+            initializeApp({
+                credential: cert({
+                    projectId: firebaseProjectId,
+                    clientEmail: firebaseClientEmail,
+                    privateKey: firebasePrivateKey.replace(/\\n/g, '\n'),
+                }),
+            });
+            console.log('[Firebase] ✅ Admin SDK initialized with service account credentials');
+        } else {
+            initializeApp({ projectId: firebaseProjectId });
+            console.log('[Firebase] ✅ Admin SDK initialized (project-only, no service account)');
+        }
     }
-    firebaseInitialized = true;
-    console.log('[Firebase] ✅ Admin SDK initialized (project: vosil-ai)');
 } catch (err) {
     console.warn('[Firebase] ⚠️ Admin SDK initialization failed:', err.message);
     console.warn('[Firebase] Token verification will fall back to X-User-Id header');
@@ -2149,19 +2167,15 @@ ${resultsBlock}
 // ============================================================
 
 // ─── Firebase Token Verification ───
-// Since we use Firebase Auth on the client side, the user sends the Firebase ID token
-// in the Authorization header. We verify it here using Firebase Auth REST API.
-// This avoids needing a service account file on the server.
+// The client sends the Firebase ID token in the Authorization header.
+// We verify it using the Firebase Admin SDK.
 async function verifyFirebaseToken(token) {
     if (!token || typeof token !== 'string') return null;
     try {
-        // Use Firebase Auth REST API to verify the token
-        const apiKey = process.env.GEMINI_API_KEY; // We don't have a separate FB API key available, so decode locally
-        // Actually, let's use firebase-admin properly
-        const decodedToken = await admin.auth().verifyIdToken(token);
+        const decodedToken = await getAuth().verifyIdToken(token);
         return decodedToken;
     } catch (err) {
-        console.warn('[Auth] Firebase token verification failed:', err.message);
+        console.error('[Auth] ❌ Firebase token verification failed:', err.message);
         return null;
     }
 }
@@ -2182,7 +2196,7 @@ async function resolveConversationUser(req, res, next) {
                 req.firebaseUser = decoded;
                 console.log(`[Auth] ✅ Authenticated user: ${decoded.uid.substring(0, 12)}...`);
             } else {
-                // Token verification failed — fall back to X-User-Id if provided
+                console.warn('[Auth] ⚠️ Bearer token present but verification failed — falling back to anonymous');
                 req.userId = xUserId || 'anonymous';
             }
         } else if (xUserId) {

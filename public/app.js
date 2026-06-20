@@ -1159,5 +1159,9 @@ function initApp() {
     }
 }
 
+// Expose to window so the auth callback (in chat.html) can re-fetch after auth resolves
+window.loadSessionsList = loadSessionsList;
+window.updateWelcomeGreeting = updateWelcomeGreeting;
+
 if (document.readyState === 'complete' || document.readyState === 'interactive') { initApp(); }
 else { document.addEventListener('DOMContentLoaded', initApp); }

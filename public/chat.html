@@ -362,12 +362,17 @@
             const sidebarAvatar = document.querySelector('.user-avatar');
             if (sidebarName) sidebarName.textContent = window.userName;
             if (sidebarAvatar) {
-                if (userData.photoURL) {
-                    sidebarAvatar.innerHTML = `<img src="${userData.photoURL}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
+                const photoURL = userData.photoURL || user.photoURL;
+                if (photoURL) {
+                    sidebarAvatar.innerHTML = `<img src="${photoURL}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
                 } else {
                     sidebarAvatar.textContent = window.userName.charAt(0).toUpperCase();
                 }
             }
+
+            // Re-fetch conversations and update greeting now that auth is ready
+            if (window.loadSessionsList) window.loadSessionsList();
+            if (window.updateWelcomeGreeting) window.updateWelcomeGreeting();
         });
 
         // ─── Profile Modal ───
