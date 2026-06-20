@@ -1,4 +1,0 @@
-data: {"text":"Hein? Malek ghir n9ita a sat? 🤔"}
-
-data: {"text":"","done":true,"sessionId":"sess_e56a43b1"}
-
