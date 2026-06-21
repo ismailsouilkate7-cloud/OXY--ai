@@ -90,6 +90,9 @@ const lightboxClose = document.getElementById('lightbox-close');
 const lightboxDownload = document.getElementById('lightbox-download');
 const lightboxCounter = document.getElementById('lightbox-counter');
 
+// Image Generation elements
+const sparkleBtn = document.getElementById('sparkle-btn');
+
 let lightboxImages = [];
 let lightboxCurrentIndex = 0;
 
@@ -795,12 +798,20 @@ function appendMessage(text, sender, finalRender = true, files = null) {
 
 function handleSend() {
     const text = messageInput.value.trim();
-    console.log('[Input] handleSend called, text:', text ? `"${text.substring(0, 50)}..."` : '(empty)', 'files:', pendingFiles.length, 'generating:', isGenerating, 'uploading:', isUploading);
-    if ((!text && pendingFiles.length === 0) || isGenerating || isUploading) {
+    console.log('[Input] handleSend called, text:', text ? `"${text.substring(0, 50)}..."` : '(empty)', 'files:', pendingFiles.length, 'generating:', isGenerating, 'uploading:', isUploading, 'img-mode:', imageGenMode);
+    if ((!text && pendingFiles.length === 0) || isGenerating || isUploading || isGeneratingImage) {
         console.log('[Input] handleSend blocked — no text/files, or already generating/uploading');
         return;
     }
     messageInput.value = ''; messageInput.style.height = 'auto'; sendBtn.disabled = true;
+
+    if (imageGenMode && text) {
+        imageGenMode = false;
+        updateImageGenModeUI();
+        handleImageGeneration(text);
+        return;
+    }
+
     const filesForHistory = pendingFiles.map(f => { addRecentFile({ name: f.name, type: f.type, size: f.size }); return { name: f.name, type: f.type, size: f.size, preview: f.preview }; });
     currentChatHistory.push({ text: text, sender: 'user', files: filesForHistory });
     renderHistory();
@@ -1106,6 +1117,106 @@ window.cancelEditMessage = function(btn) {
     actionsDiv.innerHTML = `<button class="msg-action-btn" onclick="copyMessage('${originalText.replace(/'/g, '\\x27')}')" title="Copy"><i class="fa-regular fa-copy"></i></button>
         <button class="msg-action-btn" onclick="editMessage(this)" title="Edit"><i class="fa-solid fa-pen"></i></button>`;
 };
+
+// ─── Image Generation (inline mode) ───
+let imageGenMode = false;
+let isGeneratingImage = false;
+
+function updateImageGenModeUI() {
+    if (!sparkleBtn) return;
+    const isActive = imageGenMode;
+    sparkleBtn.classList.toggle('active', isActive);
+    messageInput.placeholder = isActive
+        ? 'Describe the image you want to create...'
+        : 'Message VOSIL...';
+    if (!isActive) {
+        messageInput.focus();
+    }
+}
+
+if (sparkleBtn) sparkleBtn.addEventListener('click', () => {
+    if (isGeneratingImage) return;
+    imageGenMode = !imageGenMode;
+    updateImageGenModeUI();
+});
+
+async function handleImageGeneration(prompt) {
+    isGeneratingImage = true;
+    sendBtn.disabled = true;
+
+    const hasImage = pendingFiles.some(f => f.type.startsWith('image/'));
+
+    const filesForHistory = pendingFiles.map(f => ({
+        name: f.name, type: f.type, size: f.size, preview: f.preview,
+    }));
+    currentChatHistory.push({ text: prompt, sender: 'user', files: filesForHistory });
+    currentChatHistory.push({ text: '', sender: 'bot', files: [], _generating: true });
+    clearPendingFiles();
+    renderHistory();
+
+    if (hasImage) {
+        const generatingIdx = currentChatHistory.findIndex(e => e._generating);
+        if (generatingIdx !== -1) currentChatHistory.splice(generatingIdx, 1);
+        currentChatHistory.push({
+            text: '⚠️ **Image editing is currently unavailable.**',
+            sender: 'bot',
+            files: [],
+        });
+        renderHistory();
+        isGeneratingImage = false;
+        sendBtn.disabled = false;
+        messageInput.focus();
+        return;
+    }
+
+    const lastBotMsg = messagesWrapper.querySelector('.message.bot:last-child');
+    if (lastBotMsg) {
+        const skeleton = document.createElement('div');
+        skeleton.className = 'gen-skeleton';
+        skeleton.innerHTML = '<div class="gen-skeleton-label">Generating image...</div>';
+        const contentEl = lastBotMsg.querySelector('.message-content');
+        if (contentEl) contentEl.appendChild(skeleton);
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
+
+    try {
+        const genRes = await fetch('/api/generate-image', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompt, sessionId: currentSessionId }),
+        });
+        const genData = await genRes.json();
+        if (!genRes.ok) throw new Error(genData.error || 'Generation failed');
+
+        const lastEntry = currentChatHistory[currentChatHistory.length - 1];
+        if (lastEntry && lastEntry._generating) {
+            lastEntry.text = `🖼️ **Generated:** ${prompt}`;
+            lastEntry.files = [{ name: genData.name, type: genData.type, url: genData.url, size: 0 }];
+            delete lastEntry._generating;
+        }
+
+        renderHistory();
+        saveSession();
+
+        requestAnimationFrame(() => {
+            const imgs = messagesWrapper.querySelectorAll('.msg-attach-img');
+            const lastImg = imgs[imgs.length - 1];
+            if (lastImg) lastImg.classList.add('gen-result-image');
+        });
+    } catch (err) {
+        const generatingIdx = currentChatHistory.findIndex(e => e._generating);
+        if (generatingIdx !== -1) currentChatHistory.splice(generatingIdx, 1);
+        currentChatHistory.push({
+            text: `⚠️ **Generation failed:** ${err.message}`,
+            sender: 'bot', files: [],
+        });
+        renderHistory();
+    } finally {
+        isGeneratingImage = false;
+        sendBtn.disabled = false;
+        messageInput.focus();
+    }
+}
 
 window.sendSuggestion = function(text) { messageInput.value = text; updateSendButton(); handleSend(); };
 

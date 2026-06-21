@@ -14,6 +14,7 @@ import fs from 'fs';
 import crypto from 'crypto';
 import { initializeApp, getApps, cert } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
+import { createClient } from '@supabase/supabase-js';
 import pool, { initDb, isDatabaseReady, getDbDiagnostics } from './db.js';
 
 dotenv.config();
@@ -53,6 +54,174 @@ try {
 } catch (err) {
     console.warn('[Firebase] ⚠️ Admin SDK initialization failed:', err.message);
     console.warn('[Firebase] Token verification will fall back to X-User-Id header');
+}
+
+// ============================================================
+// Supabase Storage Client
+// ============================================================
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+let supabase = null;
+
+if (SUPABASE_URL && SUPABASE_SERVICE_ROLE_KEY) {
+    supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+    console.log('[Supabase] ✅ Storage client initialized');
+} else {
+    console.warn('[Supabase] ⚠️ Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY — image generation/editing will not work');
+}
+
+async function uploadToSupabase(buffer, fileName, contentType) {
+    if (!supabase) throw new Error('Supabase not configured');
+    const { error } = await supabase.storage
+        .from('generated-images')
+        .upload(fileName, buffer, { contentType, upsert: false });
+    if (error) throw error;
+    const { data: { publicUrl } } = supabase.storage
+        .from('generated-images')
+        .getPublicUrl(fileName);
+    return publicUrl;
+}
+
+// ============================================================
+// Cloudflare Workers AI — Image Models Service
+// ============================================================
+const CLOUDFLARE_ACCOUNT_ID = process.env.CLOUDFLARE_ACCOUNT_ID;
+const CLOUDFLARE_API_TOKEN = process.env.CLOUDFLARE_API_TOKEN;
+
+if (!CLOUDFLARE_ACCOUNT_ID) console.warn('[CF] ⚠️ CLOUDFLARE_ACCOUNT_ID not set — image gen/editing will not work');
+if (!CLOUDFLARE_API_TOKEN) console.warn('[CF] ⚠️ CLOUDFLARE_API_TOKEN not set — image gen/editing will not work');
+
+const GENERATION_MODELS = [
+    { model: '@cf/black-forest-labs/flux-1-schnell', label: 'FLUX.1-schnell' },
+    { model: '@cf/bytedance/stable-diffusion-xl-lightning', label: 'SDXL-Lightning' },
+    { model: '@cf/lykon/dreamshaper-8-lcm', label: 'Dreamshaper-8-LCM' },
+];
+
+const EDITING_MODELS = [
+    { model: '@cf/runwayml/stable-diffusion-v1-5-img2img', label: 'SD-v1.5-img2img' },
+];
+
+async function callCloudflareImageModel(model, body) {
+    if (!CLOUDFLARE_ACCOUNT_ID || !CLOUDFLARE_API_TOKEN) throw new Error('Cloudflare credentials not configured');
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 120000);
+    try {
+        const url = `https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/ai/run/${model}`;
+        console.log(`[CF] → POST ${model}`);
+        console.log(`[CF]   payload: ${JSON.stringify(body).substring(0, 300)}`);
+
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${CLOUDFLARE_API_TOKEN}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(body),
+            signal: controller.signal,
+        });
+        clearTimeout(timeout);
+
+        if (response.status === 429) {
+            const err = new Error(`Rate limited by ${model}`);
+            err.status = 429;
+            err.rateLimited = true;
+            err.model = model;
+            throw err;
+        }
+
+        const contentType = response.headers.get('content-type') || '';
+        let base64Image;
+
+        if (contentType.startsWith('image/')) {
+            const arrayBuffer = await response.arrayBuffer();
+            base64Image = Buffer.from(arrayBuffer).toString('base64');
+            console.log(`[CF] ← ${model} — binary, ${(arrayBuffer.byteLength / 1024).toFixed(1)} KB`);
+        } else {
+            const data = await response.json();
+            if (!response.ok || !data.success) {
+                const apiErr = data.errors?.[0]?.message || JSON.stringify(data.errors) || 'Unknown API error';
+                const err = new Error(`CF API error (${response.status}): ${apiErr}`);
+                err.status = response.status;
+                err.model = model;
+                err.cloudflareErrors = data.errors;
+                console.error(`[CF] ← ${model} — REJECTED: ${apiErr.substring(0, 200)}`);
+                throw err;
+            }
+            if (data.result?.image) {
+                base64Image = data.result.image;
+            } else if (data.result?.result?.image) {
+                base64Image = data.result.result.image;
+            } else {
+                console.error(`[CF] ⚠️ Unexpected response from ${model}:`, JSON.stringify(data).substring(0, 500));
+                const err = new Error(`Unexpected response format from ${model}`);
+                err.status = 502;
+                err.model = model;
+                throw err;
+            }
+            const sizeKB = (Buffer.from(base64Image, 'base64').length / 1024).toFixed(1);
+            console.log(`[CF] ← ${model} — JSON, ${sizeKB} KB`);
+        }
+
+        return { base64: base64Image, model };
+    } catch (err) {
+        clearTimeout(timeout);
+        if (err.name === 'AbortError') {
+            const timeoutErr = new Error(`${model} timed out after 120s`);
+            timeoutErr.timeout = true;
+            timeoutErr.model = model;
+            throw timeoutErr;
+        }
+        if (err.rateLimited || err.status) throw err;
+        console.error(`[CF] ❌ ${model} failed:`);
+        console.error(`  message: ${err.message}`);
+        if (err.cause?.code) console.error(`  cause.code: ${err.cause.code}`);
+        if (err.stack) console.error(`  stack:   ${err.stack.split('\n').slice(0, 4).join('\n    ')}`);
+        err.model = model;
+        throw err;
+    }
+}
+
+async function generateImage(prompt) {
+    let lastError = null;
+    for (const { model, label } of GENERATION_MODELS) {
+        try {
+            console.log(`[CF] 🎨 Trying ${label} (${model})`);
+            const body = { prompt, seed: Math.floor(Math.random() * 2147483647) };
+            const result = await callCloudflareImageModel(model, body);
+            console.log(`[CF] ✅ ${label} succeeded`);
+            return result;
+        } catch (err) {
+            lastError = err;
+            console.warn(`[CF] ⚠️ ${label} failed, trying next model...`);
+        }
+    }
+    throw lastError || new Error('All generation models exhausted');
+}
+
+async function editImage(imageBuffer, instruction, contentType) {
+    const imageB64 = imageBuffer.toString('base64');
+    const sizeKB = (imageBuffer.length / 1024).toFixed(1);
+    let lastError = null;
+
+    for (const { model, label } of EDITING_MODELS) {
+        try {
+            console.log(`[CF] ✏️ Trying ${label} (${model}), source: ${sizeKB} KB`);
+            const body = {
+                prompt: instruction,
+                image_b64: imageB64,
+                strength: 0.75,
+                guidance: 7.5,
+                num_steps: 20,
+            };
+            const result = await callCloudflareImageModel(model, body);
+            console.log(`[CF] ✅ ${label} succeeded`);
+            return result;
+        } catch (err) {
+            lastError = err;
+            console.warn(`[CF] ⚠️ ${label} failed, trying next model...`);
+        }
+    }
+    throw lastError || new Error('All editing models exhausted');
 }
 
 // Verify Tavily API Key
@@ -1929,6 +2098,122 @@ app.post('/api/preprocess-files', upload.array('files', 10), async (req, res) =>
         console.error('[Preprocess] ❌ Error:', error.message);
         safeSseWrite(res, `data: ${JSON.stringify({ error: 'Preprocessing failed', done: true })}\n\n`);
         safeSseEnd(res);
+    }
+});
+
+// ============================================================
+// IMAGE GENERATION ENDPOINT — Cloudflare Workers AI + Supabase Storage
+// ============================================================
+
+app.post('/api/generate-image', async (req, res) => {
+    try {
+        const { prompt, sessionId } = req.body;
+        if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
+            return res.status(400).json({ error: 'Prompt is required' });
+        }
+        if (prompt.length > 1000) {
+            return res.status(400).json({ error: 'Prompt must be 1000 characters or less' });
+        }
+
+        console.log(`[CF Gen] Prompt: "${prompt.substring(0, 80)}..." session=${sessionId || 'none'}`);
+
+        const { base64: base64Image, model } = await generateImage(prompt);
+
+        const imageBuffer = Buffer.from(base64Image, 'base64');
+        console.log(`[CF Gen] ✅ ${model} — ${imageBuffer.length} bytes`);
+
+        const fileName = `${uuidv4()}.png`;
+        const publicUrl = await uploadToSupabase(imageBuffer, fileName, 'image/png');
+        console.log(`[CF Gen] Uploaded to Supabase: ${publicUrl}`);
+
+        res.json({
+            url: publicUrl,
+            name: `generated-${fileName}`,
+            type: 'image/png',
+        });
+    } catch (err) {
+        if (err.rateLimited) {
+            console.warn('[CF Gen] Rate limited');
+            return res.status(429).json({ error: '⚠️ Image generation is busy. Please try again in a moment.', rateLimited: true });
+        }
+        if (err.timeout) {
+            return res.status(504).json({ error: '⚠️ Image generation timed out. The model may be loading — please try again.' });
+        }
+        console.error(`[CF Gen] ❌ Failed:`);
+        console.error(`  message: ${err.message}`);
+        if (err.model) console.error(`  model:   ${err.model}`);
+        if (err.cause?.code) console.error(`  cause.code: ${err.cause.code}`);
+        if (err.stack) console.error(`  stack:   ${err.stack.split('\n').slice(0, 4).join('\n    ')}`);
+        res.status(500).json({ error: '⚠️ Image generation failed: ' + err.message });
+    }
+});
+
+// ============================================================
+// IMAGE EDITING ENDPOINT — Cloudflare Workers AI + Supabase Storage
+// ============================================================
+
+app.post('/api/edit-image', upload.single('file'), async (req, res) => {
+    try {
+        const instruction = (req.body.instruction || '').trim();
+        const sessionId = req.body.sessionId;
+
+        if (!instruction) {
+            return res.status(400).json({ error: 'Edit instruction is required' });
+        }
+        if (instruction.length > 500) {
+            return res.status(400).json({ error: 'Instruction must be 500 characters or less' });
+        }
+
+        let imageBuffer;
+        let contentType = 'image/png';
+
+        if (req.file) {
+            imageBuffer = req.file.buffer;
+            contentType = req.file.mimetype || 'image/png';
+            console.log(`[CF Edit] Source: uploaded file — ${(imageBuffer.length / 1024).toFixed(1)} KB, ${contentType}`);
+        } else {
+            const { imageUrl } = req.body;
+            if (!imageUrl || typeof imageUrl !== 'string') {
+                return res.status(400).json({ error: 'Image file or imageUrl is required' });
+            }
+            const fetchRes = await fetch(imageUrl, { signal: AbortSignal.timeout(30000) });
+            if (!fetchRes.ok) throw new Error(`Failed to fetch image (HTTP ${fetchRes.status})`);
+            const arrayBuffer = await fetchRes.arrayBuffer();
+            imageBuffer = Buffer.from(arrayBuffer);
+            contentType = fetchRes.headers.get('content-type') || 'image/png';
+            console.log(`[CF Edit] Source: fetched from URL — ${(imageBuffer.length / 1024).toFixed(1)} KB`);
+        }
+
+        console.log(`[CF Edit] Instruction: "${instruction.substring(0, 80)}..." session=${sessionId || 'none'}`);
+
+        const { base64: base64Image, model } = await editImage(imageBuffer, instruction, contentType);
+
+        const resultBuffer = Buffer.from(base64Image, 'base64');
+        console.log(`[CF Edit] ✅ ${model} — ${(resultBuffer.length / 1024).toFixed(1)} KB`);
+
+        const fileName = `${uuidv4()}-edited.png`;
+        const publicUrl = await uploadToSupabase(resultBuffer, fileName, 'image/png');
+        console.log(`[CF Edit] Uploaded to Supabase: ${publicUrl}`);
+
+        res.json({
+            url: publicUrl,
+            name: `edited-${fileName}`,
+            type: 'image/png',
+        });
+    } catch (err) {
+        if (err.rateLimited) {
+            console.warn('[CF Edit] Rate limited');
+            return res.status(429).json({ error: '⚠️ Image editing is busy. Please try again in a moment.', rateLimited: true });
+        }
+        if (err.timeout) {
+            return res.status(504).json({ error: '⚠️ Image editing timed out. The model may be loading — please try again.' });
+        }
+        console.error(`[CF Edit] ❌ Failed:`);
+        console.error(`  message: ${err.message}`);
+        if (err.model) console.error(`  model:   ${err.model}`);
+        if (err.cause?.code) console.error(`  cause.code: ${err.cause.code}`);
+        if (err.stack) console.error(`  stack:   ${err.stack.split('\n').slice(0, 4).join('\n    ')}`);
+        res.status(500).json({ error: '⚠️ Image editing failed: ' + err.message });
     }
 });
 
