@@ -1456,7 +1456,7 @@ If the answer is very short (1–3 sentences):
 - Do NOT use headings.
 
 === CODE FORMATTING ===
-- Ila kayn code f ljawab, dima dir code block m3a lbgha dial language (python, js, etc).
+- Ila kayn code f ljawab, dima dir code block m3a logha dial language (python, js, etc).
 - NEVER write code inline without code blocks.
 - Ila luser talbk chi snippet, format it cleanly with proper indentation.
 
