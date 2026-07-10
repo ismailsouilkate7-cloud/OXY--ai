@@ -944,6 +944,10 @@ body {
   color: #e2e2ea;
 }
 
+#typing-indicator {
+  display: none;
+}
+
 .typing-indicator {
   display: flex;
   align-items: center;
