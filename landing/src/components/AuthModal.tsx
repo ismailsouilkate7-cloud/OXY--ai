@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { signUp, signIn, signInWithGooglePopup } from '../lib/firebase';
+import { getFriendlyAuthError } from '../lib/authError';
 
 interface AuthModalProps {
   isOpen: boolean;
@@ -14,11 +15,13 @@ export default function AuthModal({ isOpen, initialMode, onClose }: AuthModalPro
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
+  const [errorAction, setErrorAction] = useState<{ label: string; targetMode: 'login' | 'signup' } | null>(null);
   const [loading, setLoading] = useState(false);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
+    setErrorAction(null);
     setLoading(true);
     try {
       if (mode === 'signup') {
@@ -28,7 +31,9 @@ export default function AuthModal({ isOpen, initialMode, onClose }: AuthModalPro
       }
       onClose();
     } catch (err: any) {
-      setError(err.message.replace('Firebase: ', ''));
+      const friendlyError = getFriendlyAuthError(err, mode);
+      setError(friendlyError.message);
+      setErrorAction(friendlyError.action ?? null);
     } finally {
       setLoading(false);
     }
@@ -36,12 +41,15 @@ export default function AuthModal({ isOpen, initialMode, onClose }: AuthModalPro
 
   const handleGoogle = async () => {
     setError('');
+    setErrorAction(null);
     setLoading(true);
     try {
       await signInWithGooglePopup();
       onClose();
     } catch (err: any) {
-      setError(err.message.replace('Firebase: ', ''));
+      const friendlyError = getFriendlyAuthError(err, mode);
+      setError(friendlyError.message);
+      setErrorAction(friendlyError.action ?? null);
     } finally {
       setLoading(false);
     }
@@ -140,7 +148,20 @@ export default function AuthModal({ isOpen, initialMode, onClose }: AuthModalPro
 
               {error && (
                 <div className="bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-3 text-sm text-red-400">
-                  {error}
+                  <div>{error}</div>
+                  {errorAction && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMode(errorAction.targetMode);
+                        setError('');
+                        setErrorAction(null);
+                      }}
+                      className="mt-2 font-medium text-primary hover:text-primary-hover transition-colors"
+                    >
+                      {errorAction.label}
+                    </button>
+                  )}
                 </div>
               )}
 
@@ -189,6 +210,7 @@ export default function AuthModal({ isOpen, initialMode, onClose }: AuthModalPro
                 onClick={() => {
                   setMode(isLogin ? 'signup' : 'login');
                   setError('');
+                  setErrorAction(null);
                 }}
                 className="text-primary hover:text-primary-hover font-medium transition-colors"
               >
