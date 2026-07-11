@@ -39,7 +39,7 @@ export function getFriendlyAuthError(error: unknown, mode: 'login' | 'signup'): 
       };
     case 'auth/invalid-credential':
     case 'auth/wrong-password':
-      return { message: 'Incorrect email or password. Please try again.' };
+      return { message: 'Incorrect email or password. Please check your credentials and try again.' };
     case 'auth/user-not-found':
       return { message: 'No account found with this email. Please sign up first.' };
     case 'auth/weak-password':

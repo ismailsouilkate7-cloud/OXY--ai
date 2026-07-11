@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { signUp, signIn, signInWithGooglePopup } from '../lib/firebase';
+import { signUp, signIn, signInWithGooglePopup, onAuthChange } from '../lib/firebase';
 import { getFriendlyAuthError } from '../lib/authError';
 
 interface AuthModalProps {
@@ -29,8 +29,36 @@ export default function AuthModal({ isOpen, initialMode, onClose }: AuthModalPro
       } else {
         await signIn(email, password);
       }
+
+      // Wait for Firebase to confirm the auth state to avoid a race
+      await new Promise<void>((resolve) => {
+        const unsub = onAuthChange((state) => {
+          if (state) {
+            unsub();
+            resolve();
+          }
+        });
+        // Fallback: resolve after 2s to avoid hanging in rare cases
+        setTimeout(() => {
+          try { unsub(); } catch {};
+          resolve();
+        }, 2000);
+      });
+
       onClose();
+
+      // Redirect to chat interface (only after auth confirmed)
+      try {
+        if (typeof window !== 'undefined') window.location.href = '/chat.html';
+      } catch (navErr) {
+        console.error('Navigation failed', navErr);
+      }
     } catch (err: any) {
+      // Confirm catch block executed
+      try { console.log('CATCH BLOCK REACHED', err); } catch {}
+      // Explicit code log for debugging auth failures (temporary)
+      try { console.log('FIREBASE LOGIN ERROR CODE:', err?.code); } catch {}
+      console.error('Auth error', err);
       const friendlyError = getFriendlyAuthError(err, mode);
       setError(friendlyError.message);
       setErrorAction(friendlyError.action ?? null);
@@ -45,8 +73,30 @@ export default function AuthModal({ isOpen, initialMode, onClose }: AuthModalPro
     setLoading(true);
     try {
       await signInWithGooglePopup();
+
+      await new Promise<void>((resolve) => {
+        const unsub = onAuthChange((state) => {
+          if (state) {
+            unsub();
+            resolve();
+          }
+        });
+        setTimeout(() => {
+          try { unsub(); } catch {};
+          resolve();
+        }, 2000);
+      });
+
       onClose();
+      try {
+        if (typeof window !== 'undefined') window.location.href = '/chat.html';
+      } catch (navErr) {
+        console.error('Navigation failed', navErr);
+      }
     } catch (err: any) {
+      try { console.log('CATCH BLOCK REACHED (google)', err); } catch {}
+      try { console.log('FIREBASE LOGIN ERROR CODE:', err?.code); } catch {}
+      console.error('Auth error', err);
       const friendlyError = getFriendlyAuthError(err, mode);
       setError(friendlyError.message);
       setErrorAction(friendlyError.action ?? null);

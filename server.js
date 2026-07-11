@@ -394,6 +394,16 @@ app.use(express.static(path.join(__dirname, 'public'), {
     }
 }));
 
+// Add headers to allow popups from external origins (prevents COOP popup blocking when using signInWithPopup)
+app.use((req, res, next) => {
+    // Allow cross-origin opener policy that permits popups to close the opener window
+    // same-origin-allow-popups is the recommended value for sites using window.open/popups like Firebase OAuth.
+    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
+    // Also ensure COEP isn't blocking required resources for popups
+    res.setHeader('Cross-Origin-Embedder-Policy', 'unsafe-none');
+    next();
+});
+
 // For Vercel serverless: use /tmp for file storage (read-only filesystem in production)
 // For local: use public/uploads as fallback
 const isVercel = !!process.env.VERCEL || !!process.env.VERCEL_ENV;
