@@ -1336,10 +1336,10 @@ const SYSTEM_PROMPT = `You are VOSIL created by Ismail Souilkate.
 kfch khasek tkon :
    -direct bzaf: jawb 3la su2al direkt, matkhrjch f lkharij.
    -ma tkhelich luser y7ess bli kayehder m3a robot khelih y7es bli kayehder m3a humain.
-   - kon friendly bzf bzf bzf ou kad7ek m3a luser ou kateste3mel "sat, sadi9i, frero, sahbi".
+   - kon friendly bzf bzf bzf ou kad7ek m3a luser ou katehder b7al sa7bo ou kateste3mel "sat, sadi9i, frero, sahbi".
    -katjaweb 3la ay su2al kifma kan.
    -katjaweb baylogha hder m3ak biha luser.
-   -fach yehder maak bdarija dekhel maaha chiwa dial fr mat3iye9ch.
+   -fach yehder maak bdarija jaweb bdarija, ila ma3reftich chikelma bdarija gulha bfrançais, matkherbe9ch lkalimat.
    -jaweb b7orof dial fr wlkn ghir fdarija.
    -ila chiwa7ed 3ayer ismail souilkate dafe3 3la ismail souilkate bla tekhsar lhedra ou ghir btafahom.
    -kate9der dir img generation.
@@ -2074,9 +2074,7 @@ async function buildFileParts(files, client = null) {
     return { parts, fileDescriptions, pdfUris };
 }
 
-// ============================================================
-// FILE UPLOAD ENDPOINT
-// ============================================================
+// file upload endpoint
 
 app.post('/api/upload', upload.array('files', 10), async (req, res) => {
     try {
@@ -2506,9 +2504,8 @@ async function verifyFirebaseToken(token) {
     }
 }
 
-// ─── Auth middleware for conversation API ───
-// Extracts Firebase ID token from Authorization header and attaches uid to req.
-// If no token is present, the request proceeds without auth (graceful fallback).
+// Auth middleware for conversation API
+
 async function resolveConversationUser(req, res, next) {
     try {
         const authHeader = req.headers.authorization;
@@ -2568,7 +2565,8 @@ async function saveConversationToDb(sessionId, title, userId, messages) {
     }
 }
 
-// ─── Check if user owns the conversation ───
+// Check if user owns the conversation 
+
 async function checkConversationOwnership(conversationId, userId) {
     if (!isDatabaseReady() || !conversationId) return false;
     try {
@@ -2584,6 +2582,7 @@ async function checkConversationOwnership(conversationId, userId) {
 }
 
 // GET /api/conversations - Get conversations for the authenticated user
+
 app.get('/api/conversations', resolveConversationUser, async (req, res) => {
     try {
         if (!isDatabaseReady()) {
@@ -2600,7 +2599,8 @@ app.get('/api/conversations', resolveConversationUser, async (req, res) => {
     }
 });
 
-// POST /api/conversations - Save a conversation
+//  Save a conversation
+
 app.post('/api/conversations', resolveConversationUser, async (req, res) => {
     try {
         if (!isDatabaseReady()) {
@@ -2617,7 +2617,8 @@ app.post('/api/conversations', resolveConversationUser, async (req, res) => {
     }
 });
 
-// GET /api/conversations/:id/messages - Get messages for a conversation
+//  Get messages for a conversation
+
 app.get('/api/conversations/:id/messages', resolveConversationUser, async (req, res) => {
     try {
         if (!isDatabaseReady()) {
@@ -2644,7 +2645,7 @@ app.get('/api/conversations/:id/messages', resolveConversationUser, async (req, 
     }
 });
 
-// PUT /api/conversations/:id - Rename a conversation
+// Rename a conversation
 app.put('/api/conversations/:id', resolveConversationUser, async (req, res) => {
     try {
         if (!isDatabaseReady()) {
@@ -2668,7 +2669,7 @@ app.put('/api/conversations/:id', resolveConversationUser, async (req, res) => {
     }
 });
 
-// DELETE /api/conversations/:id - Delete a conversation
+// Delete a conversation
 app.delete('/api/conversations/:id', resolveConversationUser, async (req, res) => {
     try {
         if (!isDatabaseReady()) {
@@ -2689,8 +2690,8 @@ app.delete('/api/conversations/:id', resolveConversationUser, async (req, res) =
     }
 });
 
-// POST /api/chat - Main chat endpoint
-// Strip prompt-injection characters from user-supplied strings
+//  Main chat endpoint
+
 function sanitize(text, maxLen = 200) {
     if (!text || typeof text !== 'string') return '';
     return text.replace(/[\0\n\r\t\b\\"]/g, ' ').replace(/[<>{}|^`]/g, ' ').replace(/\s+/g, ' ').trim().substring(0, maxLen);
@@ -2716,6 +2717,7 @@ app.post('/api/chat', upload.array('files', 10), async (req, res) => {
         const files = req.files || [];
 
         // Validate video files before processing
+
         for (const file of files) {
             const error = validateVideoFile(file);
             if (error) return res.status(400).json({ error });
@@ -2734,6 +2736,7 @@ app.post('/api/chat', upload.array('files', 10), async (req, res) => {
         }
 
         // Check if inlineData (base64 files) was provided
+
         const hasInlineData = req.body.inlineData && Array.isArray(req.body.inlineData) && req.body.inlineData.length > 0;
 
         if (!message && files.length === 0 && processedFiles.length === 0 && !hasInlineData) {
@@ -2773,9 +2776,7 @@ app.post('/api/chat', upload.array('files', 10), async (req, res) => {
             console.log('[FACT CHECK ACTIVE]');
         }
 
-        // === FALLBACK SEARCH MODE ===
-        // If detectWebSearchIntent returned null AND isModelQuery is false,
-        // run shouldForceWebSearch as a safety net.
+        // FALLBACK SEARCH MODE
         if (!searchQuery && !isModelQuery) {
             const fallback = shouldForceWebSearch(message);
             if (fallback.force) {
@@ -2796,12 +2797,14 @@ app.post('/api/chat', upload.array('files', 10), async (req, res) => {
         }
 
         // SSE headers — now we know we're in the streaming path
+
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
         res.setHeader('Connection', 'keep-alive');
         res.setHeader('X-Accel-Buffering', 'no');
 
         // Web search with SSE activity events (frontend sees searching_web → results)
+
         let searchResults = null;
         let searchPerformed = false;
         let searchContext = '';
