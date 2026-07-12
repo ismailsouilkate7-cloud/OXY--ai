@@ -1038,7 +1038,7 @@ body {
   bottom: 0;
   left: 0;
   right: 0;
-  padding: 0 16px 14px;
+  padding: 0 16px calc(14px + env(safe-area-inset-bottom, 0px));
   z-index: 10;
 }
 
@@ -1203,18 +1203,18 @@ body {
 .input-wrapper {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 10px;
   background: rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(24px) saturate(180%);
   -webkit-backdrop-filter: blur(24px) saturate(180%);
   border: 1px solid rgba(255, 255, 255, 0.15);
   box-shadow: inset 0 0.5px 0 rgba(255, 255, 255, 0.15);
-  border-radius: var(--radius-2xl);
-  padding: 4px 4px 4px 16px;
+  border-radius: 26px;
+  padding: 12px 10px 12px 20px;
   max-width: var(--input-max-width);
   margin: 0 auto;
   width: 100%;
-  min-height: 48px;
+  min-height: 60px;
   transition: border-color 0.25s var(--ease-out);
 }
 
@@ -1232,21 +1232,21 @@ body {
   display: flex;
   align-items: center;
   flex-shrink: 0;
-  height: 34px;
+  height: 36px;
 }
 
 .attach-btn {
   background: none;
   border: none;
   color: rgba(255, 255, 255, 0.5);
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  font-size: 15px;
+  font-size: 16px;
   transition: background 0.2s var(--ease-out);
   flex-shrink: 0;
 }
@@ -1327,10 +1327,24 @@ body {
   font-size: 15px;
   line-height: 1.6;
   resize: none;
-  padding: 8px 0;
-  max-height: 140px;
-  min-height: 28px;
+  padding: 0;
+  max-height: 150px;
+  min-height: 24px;
   align-self: center;
+  overflow-y: auto;
+}
+
+#message-input::-webkit-scrollbar {
+  width: 4px;
+}
+
+#message-input::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+#message-input::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
 }
 
 #message-input::placeholder {
@@ -1341,14 +1355,14 @@ body {
   background: none;
   border: none;
   color: rgba(255, 255, 255, 0.5);
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  font-size: 15px;
+  font-size: 16px;
   transition: background 0.2s var(--ease-out);
   flex-shrink: 0;
 }
@@ -1364,8 +1378,8 @@ body {
 }
 
 .send-btn {
-  width: 34px;
-  height: 34px;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
   border: none;
   background: var(--accent);
@@ -1374,7 +1388,7 @@ body {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  font-size: 14px;
+  font-size: 15px;
   flex-shrink: 0;
   transition: background 0.2s var(--ease-out);
 }
@@ -2070,7 +2084,7 @@ body {
   }
 
   .header-title {
-    font-size: 14px;
+    font-size: 18px;
   }
 
   .messages-wrapper {
@@ -2106,33 +2120,32 @@ body {
   }
 
   .input-area {
-    padding: 0 10px 10px;
+    padding: 0 12px calc(10px + env(safe-area-inset-bottom, 0px));
   }
 
   .input-wrapper {
-    padding: 4px 4px 4px 12px;
-    border-radius: var(--radius-xl);
-    gap: 4px;
-    min-height: 44px;
+    padding: 10px 8px 10px 16px;
+    border-radius: 24px;
+    gap: 8px;
+    min-height: 56px;
   }
 
   #message-input {
-    font-size: 14px;
-    padding: 6px 0;
-    min-height: 24px;
+    font-size: 15px;
+    max-height: 150px;
   }
 
   .attach-btn,
   .sparkle-btn {
-    width: 30px;
-    height: 30px;
-    font-size: 13px;
+    width: 36px;
+    height: 36px;
+    font-size: 15px;
   }
 
   .send-btn {
-    width: 30px;
-    height: 30px;
-    font-size: 13px;
+    width: 36px;
+    height: 36px;
+    font-size: 15px;
   }
 
   .attach-menu {
@@ -2207,7 +2220,7 @@ body {
   }
 
   .welcome-screen {
-    padding: 40px 14px 28px;
+    padding: 24px 14px 20px;
   }
 
   .welcome-screen h1 {
@@ -2217,7 +2230,23 @@ body {
   .welcome-icon {
     width: 48px;
     height: 48px;
-    margin-bottom: 16px;
+    margin-bottom: 12px;
+  }
+
+  .suggestion-cards {
+    gap: 14px;
+  }
+
+  .suggestion-card {
+    min-height: 64px;
+    padding: 16px;
+    border-radius: 16px;
+    font-size: 15px;
+    line-height: 1.5;
+  }
+
+  .suggestion-card i {
+    font-size: 20px;
   }
 
   .chat-header {
@@ -2227,43 +2256,44 @@ body {
   }
 
   .header-title {
-    font-size: 13px;
+    font-size: clamp(18px, 5.5vw, 24px);
   }
 
   .sidebar-toggle-btn,
   .action-btn {
-    width: 34px;
-    height: 34px;
+    width: 44px;
+    height: 44px;
   }
 
   .input-area {
-    padding: 0 6px 6px;
+    padding: 0 0 calc(12px + env(safe-area-inset-bottom, 0px));
   }
 
   .input-wrapper {
-    padding: 3px 3px 3px 10px;
-    gap: 3px;
-    min-height: 40px;
-    border-radius: var(--radius-xl);
+    width: calc(100% - 12px);
+    max-width: none;
+    min-height: 56px;
+    padding: 8px 8px 8px 14px;
+    border-radius: 22px;
+    gap: 6px;
   }
 
   #message-input {
-    font-size: 13px;
-    padding: 5px 0;
-    min-height: 22px;
+    font-size: 16px;
+    max-height: 140px;
   }
 
   .attach-btn,
   .sparkle-btn {
-    width: 28px;
-    height: 28px;
-    font-size: 12px;
+    width: 40px;
+    height: 40px;
+    font-size: 16px;
   }
 
   .send-btn {
-    width: 28px;
-    height: 28px;
-    font-size: 12px;
+    width: 40px;
+    height: 40px;
+    font-size: 16px;
   }
 
   .code-block-wrapper pre {
