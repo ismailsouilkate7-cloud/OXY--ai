@@ -142,10 +142,7 @@ export default function AuthModal({ isOpen, initialMode, onClose }: AuthModalPro
 
             <div className="flex items-center justify-center gap-2 mb-6">
               <div className="w-8 h-8 rounded-full border-2 border-primary" />
-              <span className="text-lg font-bold tracking-wider">
-                <span className="text-primary">VO</span>
-                <span className="text-text-primary">SIL</span>
-              </span>
+              <img src="/icons/ai-avatar.svg" alt="VOSIL" style="height:28px;width:auto" />
             </div>
 
             <h2 className="text-center text-xl font-semibold mb-6">

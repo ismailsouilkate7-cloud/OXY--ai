@@ -767,7 +767,7 @@ function appendMessage(text, sender, finalRender = true, files = null) {
         const displayName = userName || 'User';
         const initials = displayName.split(' ').map(n => n[0]).join('').substring(0, 2).toUpperCase();
         avatar.textContent = initials;
-    } else { avatar.innerHTML = '<div class="logo-ring msg-ring"><div class="logo-ring-glow"></div></div>'; }
+    } else { avatar.innerHTML = '<img src="/icons/ai-avatar.svg" alt="VOSIL" class="bot-avatar-img">'; }
     const content = document.createElement('div');
     content.className = 'message-content';
     if (files && files.length > 0) { const attachGrid = buildFileAttachments(files); content.appendChild(attachGrid); }

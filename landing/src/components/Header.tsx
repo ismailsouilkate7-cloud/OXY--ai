@@ -25,10 +25,7 @@ export default function Header({ onOpenAuth }: HeaderProps) {
               <div className="absolute inset-0 rounded-full border-2 border-primary opacity-80 group-hover:opacity-100 transition-opacity" />
               <div className="absolute inset-1 rounded-full bg-primary/20 group-hover:bg-primary/30 transition-colors" />
             </div>
-            <span className="text-lg font-bold tracking-wider">
-              <span className="text-primary">VO</span>
-              <span className="text-text-primary">SIL</span>
-            </span>
+            <img src="/icons/ai-avatar.svg" alt="VOSIL" style="height:28px;width:auto" />
           </a>
 
           <nav className="hidden md:flex items-center gap-8">

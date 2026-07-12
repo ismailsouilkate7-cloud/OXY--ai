@@ -9,11 +9,11 @@
     <meta property="og:title" content="VOSIL">
     <meta property="og:description" content="Your intelligent, natural conversational assistant with multimodal capabilities.">
     <meta property="og:type" content="website">
-    <meta property="og:image" content="/icons/icon-512.png">
+    <meta property="og:image" content="/icons/ai-avatar.svg">
     <meta name="twitter:card" content="summary_large_image">
     <meta name="twitter:title" content="VOSIL">
     <meta name="twitter:description" content="Your intelligent, natural conversational assistant with multimodal capabilities.">
-    <meta name="twitter:image" content="/icons/icon-512.png">
+    <meta name="twitter:image" content="/icons/ai-avatar.svg">
 
     <link rel="manifest" href="/manifest.json">
     <meta name="theme-color" content="#0f0f0f">
@@ -21,9 +21,9 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="VOSIL">
-    <link rel="apple-touch-icon" href="/apple-touch-icon.png">
+    <link rel="apple-touch-icon" href="/icons/ai-avatar.svg">
 
-    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+    <link rel="icon" type="image/svg+xml" href="/icons/ai-avatar.svg">
     <link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
 
     <link rel="stylesheet" href="style.css">
@@ -82,7 +82,7 @@
         height: 24px;
         margin: 0 auto;
         border: 2px solid rgba(255,255,255,0.1);
-        border-top-color: #b388ff;
+        border-top-color: #d9d9d9;
         border-radius: 50%;
         animation: auth-spin 0.8s linear infinite;
     }
@@ -94,7 +94,7 @@
 <body>
     <div class="auth-loading" id="auth-loading">
         <div class="auth-loading-content">
-            <div class="auth-loading-logo"><span>VO</span>SIL</div>
+            <div class="auth-loading-logo"><img src="/icons/ai-avatar.svg" alt="VOSIL" style="height:32px;width:auto;display:inline-block;vertical-align:middle"></div>
             <div class="auth-loading-spinner"></div>
         </div>
     </div>
@@ -105,7 +105,7 @@
         <!-- Sidebar — Floating Popup -->
         <aside class="sidebar">
             <div class="sidebar-header">
-                <span class="sidebar-title">VOSIL</span>
+                <span class="sidebar-title"><img src="/icons/ai-avatar.svg" alt="VOSIL" style="height:22px;width:auto;vertical-align:middle"></span>
                 <button class="sidebar-close-btn" id="sidebar-close-btn" title="Close">
                     <i class="fa-solid fa-times"></i>
                 </button>
@@ -187,7 +187,7 @@
             <div class="chat-container" id="chat-container">
                 <!-- Welcome Screen -->
                 <div class="welcome-screen" id="welcome-screen">
-                    <div class="welcome-icon"><i class="fa-solid fa-sparkles"></i></div>
+                    <img src="/icons/ai-avatar.svg" alt="VOSIL" class="welcome-icon">
                     <h1>Welcome to VOSIL</h1>
                     <p>Your intelligent, natural conversational assistant</p>
                     
