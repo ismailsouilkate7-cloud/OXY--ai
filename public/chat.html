@@ -390,55 +390,68 @@
         window.userData = null;
         window.currentUser = null;
         
+        // Loading gate: don't redirect until Firebase has had a chance to restore the session
+        let authResolved = false;
+        let redirectTimer = null;
+
         subscribeToAuthChanges((authState) => {
             const loadingEl = document.getElementById('auth-loading');
             const appContainer = document.getElementById('app-container');
 
-            if (!authState || !authState.user) {
-                console.log('REDIRECTING TO LOGIN - no user found (authState:', authState, ')');
-                window.location.href = '/';
+            if (authState && authState.user) {
+                authResolved = true;
+                if (redirectTimer) clearTimeout(redirectTimer);
+                console.log('REDIRECTING TO APP - user found:', authState.user.email);
+                
+                const user = authState.user;
+                const userData = authState.userData;
+                window.currentUser = user;
+                window.userData = userData;
+                window.userName = userData.name || user.displayName || 'User';
+                
+                // Hide loading screen, show app
+                if (loadingEl) loadingEl.style.display = 'none';
+                if (appContainer) appContainer.style.display = '';
+
+                // Update Sidebar
+                const sidebarName = document.querySelector('.user-name');
+                const sidebarAvatar = document.querySelector('.user-avatar');
+                if (sidebarName) sidebarName.textContent = window.userName;
+                if (sidebarAvatar) {
+                    const photoURL = userData.photoURL || user.photoURL;
+                    if (photoURL) {
+                        sidebarAvatar.innerHTML = `<img src="${photoURL}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
+                    } else {
+                        sidebarAvatar.textContent = window.userName.charAt(0).toUpperCase();
+                    }
+                }
+
+                // Re-fetch conversations and update greeting now that auth is ready
+                if (window.loadSessionsList) window.loadSessionsList();
+                if (window.updateWelcomeGreeting) window.updateWelcomeGreeting();
                 return;
             }
 
-            console.log('REDIRECTING TO APP - user found:', authState.user.email);
-            
-            const user = authState.user;
-            const userData = authState.userData;
-            window.currentUser = user;
-            window.userData = userData;
-            window.userName = userData.name || user.displayName || 'User';
-            
-            // Hide loading screen, show app
-            if (loadingEl) loadingEl.style.display = 'none';
-            if (appContainer) appContainer.style.display = '';
-
-            // Update Sidebar
-            const sidebarName = document.querySelector('.user-name');
-            const sidebarAvatar = document.querySelector('.user-avatar');
-            if (sidebarName) sidebarName.textContent = window.userName;
-            if (sidebarAvatar) {
-                const photoURL = userData.photoURL || user.photoURL;
-                if (photoURL) {
-                    sidebarAvatar.innerHTML = `<img src="${photoURL}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
-                } else {
-                    sidebarAvatar.textContent = window.userName.charAt(0).toUpperCase();
-                }
+            // First null callback: Firebase hasn't restored session yet — don't redirect
+            if (!authResolved) {
+                console.log('AUTH CHECK: waiting for Firebase to restore session (null so far)');
+                return;
             }
 
-            // Re-fetch conversations and update greeting now that auth is ready
-            if (window.loadSessionsList) window.loadSessionsList();
-            if (window.updateWelcomeGreeting) window.updateWelcomeGreeting();
+            // Subsequent null callbacks (user signed out while on page): redirect
+            console.log('REDIRECTING TO LOGIN - user signed out');
+            window.location.href = '/';
         });
 
-        // Fallback: if auth doesn't resolve within 8s, redirect to login
-        setTimeout(() => {
+        // Fallback: if auth doesn't resolve within 15s, redirect to login
+        redirectTimer = setTimeout(() => {
             if (window.currentUser) {
                 console.log('FALLBACK TIMER: user found, no redirect needed');
             } else {
-                console.log('FALLBACK TIMER: still no user after 8s, redirecting to login');
+                console.log('FALLBACK TIMER: still no user after 15s, redirecting to login');
                 window.location.href = '/';
             }
-        }, 8000);
+        }, 15000);
 
         // ─── Profile Modal ───
         const profileBtn = document.getElementById('sidebar-profile-btn');

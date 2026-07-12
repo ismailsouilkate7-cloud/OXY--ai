@@ -1,14 +1,18 @@
-// Bump cache version when icon files change so the SW refreshes them
-const CACHE_NAME = 'oxy-ai-cache-v3';
+// Bump cache version whenever you deploy new code so the SW refreshes all caches
+const CACHE_NAME = 'oxy-ai-cache-v4';
 const ASSETS_TO_CACHE = [
     '/',
     '/index.html',
+    '/chat.html',
     '/app.js',
     '/style.css',
+    '/auth.js',
+    '/firebase-config.js',
     '/pdf-viewer.js',
     '/widget-renderer.js',
+    '/persistence.js',
     '/manifest.json',
-    // New PWA icon set
+    // PWA icon set
     '/apple-touch-icon.png',
     '/icons/icon-192.png',
     '/icons/icon-512.png',

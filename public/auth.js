@@ -1,4 +1,4 @@
-import { auth, db } from './firebase-config.js';
+import { auth, db, persistenceReady } from './firebase-config.js';
 import { 
   createUserWithEmailAndPassword, 
   signInWithEmailAndPassword, 
@@ -6,7 +6,9 @@ import {
   GoogleAuthProvider,
   signOut,
   onAuthStateChanged,
-  updateProfile
+  updateProfile,
+  setPersistence,
+  browserLocalPersistence
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
 import { doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
@@ -14,6 +16,7 @@ const googleProvider = new GoogleAuthProvider();
 
 export async function signUpUser(name, email, password) {
   try {
+    await persistenceReady;
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
     const user = userCredential.user;
     
@@ -37,6 +40,7 @@ export async function signUpUser(name, email, password) {
 
 export async function signInUser(email, password) {
   try {
+    await persistenceReady;
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
     return userCredential.user;
   } catch (error) {
@@ -46,6 +50,7 @@ export async function signInUser(email, password) {
 
 export async function signInWithGoogle() {
   try {
+    await persistenceReady;
     const result = await signInWithPopup(auth, googleProvider);
     const user = result.user;
     

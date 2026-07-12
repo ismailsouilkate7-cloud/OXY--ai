@@ -27,7 +27,9 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const googleProvider = new GoogleAuthProvider();
 
-setPersistence(auth, browserLocalPersistence)
+const persistenceReady = setPersistence(auth, browserLocalPersistence);
+
+persistenceReady
   .then(() => {
     console.log('FIREBASE INIT: persistence set to browserLocalPersistence (localStorage)');
   })
@@ -36,6 +38,7 @@ setPersistence(auth, browserLocalPersistence)
   });
 
 export async function signUp(name: string, email: string, password: string) {
+  await persistenceReady;
   const cred = await createUserWithEmailAndPassword(auth, email, password);
   await updateProfile(cred.user, { displayName: name });
   await setDoc(doc(db, 'users', cred.user.uid), {
@@ -49,11 +52,13 @@ export async function signUp(name: string, email: string, password: string) {
 }
 
 export async function signIn(email: string, password: string) {
+  await persistenceReady;
   const cred = await signInWithEmailAndPassword(auth, email, password);
   return cred.user;
 }
 
 export async function signInWithGooglePopup() {
+  await persistenceReady;
   const result = await signInWithPopup(auth, googleProvider);
   const user = result.user;
   const userDoc = await getDoc(doc(db, 'users', user.uid));
@@ -73,10 +78,25 @@ export async function signOutUser() {
   return signOut(auth);
 }
 
+export async function getCurrentUserWithData() {
+  const user = auth.currentUser;
+  if (!user) return null;
+  console.log('getCurrentUserWithData: found user:', user.email);
+  try {
+    const userDoc = await getDoc(doc(db, 'users', user.uid));
+    const userData = userDoc.exists()
+      ? userDoc.data()
+      : { name: user.displayName, photoURL: user.photoURL };
+    return { user, userData };
+  } catch {
+    return { user, userData: { name: user.displayName, photoURL: user.photoURL } };
+  }
+}
+
 export function onAuthChange(cb: (user: any) => void) {
   return onAuthStateChanged(auth, async (user) => {
     if (user) {
-      console.log('AUTH STATE CHANGED (React):', user.email, '(uid:', user.uid, ')');
+      console.log('AUTH STATE CHANGED (React) callback fired:', user.email, '(uid:', user.uid, ')');
       try {
         const userDoc = await getDoc(doc(db, 'users', user.uid));
         const userData = userDoc.exists()
@@ -88,7 +108,7 @@ export function onAuthChange(cb: (user: any) => void) {
         cb({ user, userData: { name: user.displayName, photoURL: user.photoURL } });
       }
     } else {
-      console.log('AUTH STATE CHANGED (React): null (no user / session not restored yet)');
+      console.log('AUTH STATE CHANGED (React) callback fired: null');
       cb(null);
     }
   });
