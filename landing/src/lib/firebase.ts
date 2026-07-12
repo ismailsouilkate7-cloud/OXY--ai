@@ -27,8 +27,11 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const googleProvider = new GoogleAuthProvider();
 
+setPersistence(auth, browserLocalPersistence).catch((err) => {
+  console.error('[Auth] Failed to set persistence:', err);
+});
+
 export async function signUp(name: string, email: string, password: string) {
-  await setPersistence(auth, browserLocalPersistence);
   const cred = await createUserWithEmailAndPassword(auth, email, password);
   await updateProfile(cred.user, { displayName: name });
   await setDoc(doc(db, 'users', cred.user.uid), {
@@ -42,13 +45,11 @@ export async function signUp(name: string, email: string, password: string) {
 }
 
 export async function signIn(email: string, password: string) {
-  await setPersistence(auth, browserLocalPersistence);
   const cred = await signInWithEmailAndPassword(auth, email, password);
   return cred.user;
 }
 
 export async function signInWithGooglePopup() {
-  await setPersistence(auth, browserLocalPersistence);
   const result = await signInWithPopup(auth, googleProvider);
   const user = result.user;
   const userDoc = await getDoc(doc(db, 'users', user.uid));

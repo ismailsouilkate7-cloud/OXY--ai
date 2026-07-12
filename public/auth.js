@@ -6,9 +6,7 @@ import {
   GoogleAuthProvider,
   signOut,
   onAuthStateChanged,
-  updateProfile,
-  setPersistence,
-  browserLocalPersistence
+  updateProfile
 } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-auth.js";
 import { doc, setDoc, getDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
 
@@ -16,7 +14,6 @@ const googleProvider = new GoogleAuthProvider();
 
 export async function signUpUser(name, email, password) {
   try {
-    await setPersistence(auth, browserLocalPersistence);
     const userCredential = await createUserWithEmailAndPassword(auth, email, password);
     const user = userCredential.user;
     
@@ -40,7 +37,6 @@ export async function signUpUser(name, email, password) {
 
 export async function signInUser(email, password) {
   try {
-    await setPersistence(auth, browserLocalPersistence);
     const userCredential = await signInWithEmailAndPassword(auth, email, password);
     return userCredential.user;
   } catch (error) {
@@ -50,7 +46,6 @@ export async function signInUser(email, password) {
 
 export async function signInWithGoogle() {
   try {
-    await setPersistence(auth, browserLocalPersistence);
     const result = await signInWithPopup(auth, googleProvider);
     const user = result.user;
     

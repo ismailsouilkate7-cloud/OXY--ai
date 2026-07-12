@@ -56,9 +56,49 @@
   gtag('config', 'G-2KLP7QEK6B');
 </script>
 
+<style>
+    .auth-loading {
+        position: fixed;
+        inset: 0;
+        z-index: 99999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        background: #0f0f0f;
+    }
+    .auth-loading-content {
+        text-align: center;
+    }
+    .auth-loading-logo {
+        font-size: 2rem;
+        font-weight: 800;
+        letter-spacing: 0.15em;
+        margin-bottom: 1.5rem;
+        color: #fff;
+    }
+    .auth-loading-logo span:first-child { color: #b388ff; }
+    .auth-loading-spinner {
+        width: 24px;
+        height: 24px;
+        margin: 0 auto;
+        border: 2px solid rgba(255,255,255,0.1);
+        border-top-color: #b388ff;
+        border-radius: 50%;
+        animation: auth-spin 0.8s linear infinite;
+    }
+    @keyframes auth-spin {
+        to { transform: rotate(360deg); }
+    }
+</style>
 </head>
 <body>
-    <div class="app-container">
+    <div class="auth-loading" id="auth-loading">
+        <div class="auth-loading-content">
+            <div class="auth-loading-logo"><span>VO</span>SIL</div>
+            <div class="auth-loading-spinner"></div>
+        </div>
+    </div>
+    <div class="app-container" id="app-container" style="display:none;">
         <!-- Sidebar Overlay (mobile/tablet) -->
         <div class="sidebar-overlay" id="sidebar-overlay"></div>
 
@@ -351,6 +391,9 @@
         window.currentUser = null;
         
         subscribeToAuthChanges((authState) => {
+            const loadingEl = document.getElementById('auth-loading');
+            const appContainer = document.getElementById('app-container');
+
             if (!authState || !authState.user) {
                 window.location.href = '/';
                 return;
@@ -362,6 +405,10 @@
             window.userData = userData;
             window.userName = userData.name || user.displayName || 'User';
             
+            // Hide loading screen, show app
+            if (loadingEl) loadingEl.style.display = 'none';
+            if (appContainer) appContainer.style.display = '';
+
             // Update Sidebar
             const sidebarName = document.querySelector('.user-name');
             const sidebarAvatar = document.querySelector('.user-avatar');
@@ -379,6 +426,13 @@
             if (window.loadSessionsList) window.loadSessionsList();
             if (window.updateWelcomeGreeting) window.updateWelcomeGreeting();
         });
+
+        // Fallback: if auth doesn't resolve within 8s, redirect to login
+        setTimeout(() => {
+            if (!window.currentUser) {
+                window.location.href = '/';
+            }
+        }, 8000);
 
         // ─── Profile Modal ───
         const profileBtn = document.getElementById('sidebar-profile-btn');
