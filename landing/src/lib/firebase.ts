@@ -27,9 +27,13 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 const googleProvider = new GoogleAuthProvider();
 
-setPersistence(auth, browserLocalPersistence).catch((err) => {
-  console.error('[Auth] Failed to set persistence:', err);
-});
+setPersistence(auth, browserLocalPersistence)
+  .then(() => {
+    console.log('FIREBASE INIT: persistence set to browserLocalPersistence (localStorage)');
+  })
+  .catch((err) => {
+    console.error('[Auth] Failed to set persistence:', err);
+  });
 
 export async function signUp(name: string, email: string, password: string) {
   const cred = await createUserWithEmailAndPassword(auth, email, password);
@@ -72,6 +76,7 @@ export async function signOutUser() {
 export function onAuthChange(cb: (user: any) => void) {
   return onAuthStateChanged(auth, async (user) => {
     if (user) {
+      console.log('AUTH STATE CHANGED (React):', user.email, '(uid:', user.uid, ')');
       try {
         const userDoc = await getDoc(doc(db, 'users', user.uid));
         const userData = userDoc.exists()
@@ -79,9 +84,11 @@ export function onAuthChange(cb: (user: any) => void) {
           : { name: user.displayName, photoURL: user.photoURL };
         cb({ user, userData });
       } catch {
+        console.log('AUTH STATE CHANGED (React): Firestore fetch failed, falling back');
         cb({ user, userData: { name: user.displayName, photoURL: user.photoURL } });
       }
     } else {
+      console.log('AUTH STATE CHANGED (React): null (no user / session not restored yet)');
       cb(null);
     }
   });

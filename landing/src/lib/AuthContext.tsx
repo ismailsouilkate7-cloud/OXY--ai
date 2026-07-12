@@ -23,11 +23,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
+    console.log('AUTH CONTEXT: subscribing to onAuthChange');
     const unsub = onAuthChange((state) => {
+      if (state) {
+        console.log('AUTH CONTEXT: received user:', state.user?.email);
+      } else {
+        console.log('AUTH CONTEXT: received null — setting loading=false');
+      }
       setAuthState(state);
       setLoading(false);
     });
-    return unsub;
+    return () => {
+      console.log('AUTH CONTEXT: unsubscribing (cleanup)');
+      unsub();
+    };
   }, []);
 
   const signOut = async () => {

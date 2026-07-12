@@ -45,6 +45,8 @@ export default function AuthModal({ isOpen, initialMode, onClose }: AuthModalPro
         }, 2000);
       });
 
+      console.log('AUTHMODAL: login successful, redirecting to /chat.html');
+
       onClose();
 
       // Redirect to chat interface (only after auth confirmed)
@@ -86,6 +88,8 @@ export default function AuthModal({ isOpen, initialMode, onClose }: AuthModalPro
           resolve();
         }, 2000);
       });
+
+      console.log('AUTHMODAL: Google login successful, redirecting to /chat.html');
 
       onClose();
       try {

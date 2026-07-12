@@ -395,9 +395,12 @@
             const appContainer = document.getElementById('app-container');
 
             if (!authState || !authState.user) {
+                console.log('REDIRECTING TO LOGIN - no user found (authState:', authState, ')');
                 window.location.href = '/';
                 return;
             }
+
+            console.log('REDIRECTING TO APP - user found:', authState.user.email);
             
             const user = authState.user;
             const userData = authState.userData;
@@ -429,7 +432,10 @@
 
         // Fallback: if auth doesn't resolve within 8s, redirect to login
         setTimeout(() => {
-            if (!window.currentUser) {
+            if (window.currentUser) {
+                console.log('FALLBACK TIMER: user found, no redirect needed');
+            } else {
+                console.log('FALLBACK TIMER: still no user after 8s, redirecting to login');
                 window.location.href = '/';
             }
         }, 8000);
