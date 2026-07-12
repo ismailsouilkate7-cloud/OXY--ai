@@ -80,9 +80,12 @@ self.addEventListener('fetch', (event) => {
                 }
                 return networkResponse;
             })
-            .catch(() => {
+            .catch(async () => {
                 // If network fails (offline), fall back to cache
-                return caches.match(event.request);
+                const cached = await caches.match(event.request);
+                if (cached) return cached;
+                // Return a minimal fallback response if nothing is cached
+                return new Response('Offline', { status: 503, statusText: 'Service Unavailable' });
             })
     );
 });

@@ -70,13 +70,14 @@
         text-align: center;
     }
     .auth-loading-logo {
-        font-size: 2rem;
-        font-weight: 800;
-        letter-spacing: 0.15em;
         margin-bottom: 1.5rem;
-        color: #fff;
     }
-    .auth-loading-logo span:first-child { color: #b388ff; }
+    .auth-loading-logo img {
+        width: clamp(96px, 18vw, 160px);
+        height: auto;
+        display: block;
+        margin: 0 auto;
+    }
     .auth-loading-spinner {
         width: 24px;
         height: 24px;
@@ -94,7 +95,7 @@
 <body>
     <div class="auth-loading" id="auth-loading">
         <div class="auth-loading-content">
-            <div class="auth-loading-logo"><img src="/icons/ai-avatar.svg" alt="VOSIL" style="height:32px;width:auto;display:inline-block;vertical-align:middle"></div>
+            <div class="auth-loading-logo"><img src="/icons/ai-avatar.svg" alt="VOSIL"></div>
             <div class="auth-loading-spinner"></div>
         </div>
     </div>

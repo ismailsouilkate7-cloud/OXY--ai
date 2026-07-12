@@ -41,7 +41,7 @@ function AuthGate({ children }: { children: React.ReactNode }) {
       }}>
         <div style={{ textAlign: 'center' }}>
           <div style={{
-            fontSize: '2rem', fontWeight: 800, letterSpacing: '0.15em',
+            fontSize: 'clamp(2.5rem, 6vw, 4.5rem)', fontWeight: 800, letterSpacing: '0.15em',
             marginBottom: '1.5rem', color: '#fff'
           }}>
             <span style={{ color: '#b388ff' }}>VO</span>SIL
