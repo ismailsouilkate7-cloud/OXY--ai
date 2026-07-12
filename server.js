@@ -2544,6 +2544,15 @@ async function resolveConversationUser(req, res, next) {
 }
 
 // ─── Save conversation to database ───
+function parseStoredContent(content) {
+    if (typeof content !== 'string') return { text: String(content || ''), id: null, replyTo: null };
+    try {
+        const p = JSON.parse(content);
+        if (p && typeof p.t === 'string') return { text: p.t, id: p.i || null, replyTo: p.r || null };
+    } catch {}
+    return { text: content, id: null, replyTo: null };
+}
+
 async function saveConversationToDb(sessionId, title, userId, messages) {
     if (!isDatabaseReady()) return false;
     try {
@@ -2648,7 +2657,10 @@ app.get('/api/conversations/:id/messages', resolveConversationUser, async (req, 
             'SELECT role, content FROM messages WHERE conversation_id = $1 ORDER BY created_at ASC',
             [req.params.id]
         );
-        res.json(msgResult.rows.map(m => ({ role: m.role, text: m.content })));
+        res.json(msgResult.rows.map(m => {
+            const parsed = parseStoredContent(m.content);
+            return { role: m.role, text: parsed.text, id: parsed.id, replyTo: parsed.replyTo };
+        }));
     } catch (err) {
         console.error(`[Conversations] GET /api/conversations/${req.params.id}/messages failed:`, err.message);
         res.json([]);
@@ -2725,6 +2737,8 @@ app.post('/api/chat', upload.array('files', 10), async (req, res) => {
         const rawTemp = parseFloat(req.body.temperature);
         const temperature = (!isNaN(rawTemp) && rawTemp >= 0 && rawTemp <= 2) ? rawTemp : 0.7;
         const files = req.files || [];
+        const replyTo = req.body.replyTo || null;
+        const replyToContent = req.body.replyToContent || null;
 
         // Validate video files before processing
 
@@ -2857,6 +2871,13 @@ app.post('/api/chat', upload.array('files', 10), async (req, res) => {
             console.log(`[WEB] injected into prompt | ${searchContext.length} chars in system instruction`);
         }
         let currentSystemPrompt = `${SYSTEM_PROMPT}${dateContext}\n\nThe user is named "${userName || 'User'}".${locationContext}${genderContext}${searchSystemContext}${ambiguityContext}`;
+
+        // Append reply context if user is replying to a specific message
+        if (replyTo && replyToContent) {
+            const sanitizedOriginal = sanitize(replyToContent, 1000);
+            const sanitizedMessage = sanitize(message, 1000);
+            currentSystemPrompt += `\n\n---\nReply Context\nThe user's latest message is replying to a previous message.\n\nOriginal message:\n"${sanitizedOriginal}"\n\nUser's new message:\n"${sanitizedMessage}"\n\nInterpret the user's latest message as referring specifically to the quoted message above.\nIf the reply corrects or changes the previous context, follow the corrected context naturally.\nDo not assume the reply refers to the latest message unless appropriate.\n---`;
+        }
         
         if (isModelQuery) {
             currentSystemPrompt += `\n\n>>> CRITICAL FIX RULES: NEVER answer model/version questions (like "latest Claude", "newest GPT") from memory. NEVER invent release dates (especially future dates like 2026). If a model name + year is requested, verify via web search results first. If generated date > ${currentYear}, it is INVALID. Web search results ALWAYS override training knowledge. <<<`;
@@ -3035,7 +3056,24 @@ app.post('/api/chat', upload.array('files', 10), async (req, res) => {
                     }
                     
                     console.log('[Chat] Final request to API will include', userParts.length, 'parts with message length:', fullMessage.length);
-                    return [...historyToUse.slice(0, -1), { role: "user", parts: userParts }];
+
+                    const contents = [...historyToUse.slice(0, -1), { role: "user", parts: userParts }];
+
+                    if (replyTo && replyToContent) {
+                        const syntheticText = `User Context:\n\nThe next user message is replying to this earlier message:\n\n"${replyToContent}"\n\nInterpret the next user message using the quoted message above as the primary context.\nThe rest of the conversation history is still valid.`;
+                        const syntheticEntry = { role: "user", parts: [{ text: syntheticText }] };
+                        contents.splice(contents.length - 1, 0, syntheticEntry);
+                        console.log(`[Reply] replyTo=${replyTo}`);
+                        console.log(`[Reply] Original replied message: "${replyToContent.substring(0, 200)}"`);
+                        console.log(`[Reply] Synthetic context inserted at index ${contents.length - 2} of ${contents.length} total entries`);
+                    }
+
+                    console.log('[Chat] Final reqData.contents before generateContent:', JSON.stringify(contents.map(c => ({
+                        role: c.role,
+                        textPreview: c.parts?.[0]?.text?.substring(0, 120) || '(non-text)'
+                    })), null, 2));
+
+                    return contents;
                 }
             }, true)
         );

@@ -109,6 +109,31 @@ let cameraStream = null;
 let cameraFacingMode = 'user';
 let fileIdCounter = 0;
 
+// Reply state
+let replyToMessage = null;
+let messageIdCounter = 0;
+
+function generateMessageId() {
+    return 'msg_' + (++messageIdCounter) + '_' + Date.now().toString(36);
+}
+
+function getMessageById(id) {
+    return currentChatHistory.find(m => m.id === id) || null;
+}
+
+function getMessageIndexById(id) {
+    return currentChatHistory.findIndex(m => m.id === id);
+}
+
+function parseStoredContent(content) {
+    if (typeof content !== 'string') return { text: String(content || ''), id: null, replyTo: null };
+    try {
+        const p = JSON.parse(content);
+        if (p && typeof p.t === 'string') return { text: p.t, id: p.i || null, replyTo: p.r || null };
+    } catch {}
+    return { text: content, id: null, replyTo: null };
+}
+
 function getRecentFiles() {
     if (typeof vosilPersistence !== 'undefined') {
         const val = vosilPersistence.getItem('vosil_recent_files');
@@ -188,19 +213,24 @@ async function saveSessionToDb() {
     if (!currentSessionId) return;
     try {
         // Build messages from currentChatHistory for DB storage
-        const messages = currentChatHistory.map(msg => ({
-            role: msg.sender === 'user' ? 'user' : 'model',
-            content: msg.text || ''
-        }));
+        const messages = currentChatHistory.map(msg => {
+            const needsEncoding = msg.replyTo || msg.id;
+            return {
+                role: msg.sender === 'user' ? 'user' : 'model',
+                content: needsEncoding
+                    ? JSON.stringify({ t: msg.text || '', i: msg.id, r: msg.replyTo || null })
+                    : (msg.text || '')
+            };
+        });
         
         // Only save if we have messages
         if (messages.length === 0) return;
         
-        // Get first user message as title (truncate to first 80 chars)
         const firstUserMsg = messages.find(m => m.role === 'user');
-        const title = firstUserMsg 
-            ? firstUserMsg.content.replace(/[\n\r]+/g, ' ').trim().substring(0, 80) || 'New Chat'
-            : 'New Chat';
+        let titleText = firstUserMsg ? firstUserMsg.content : '';
+        const parsed = parseStoredContent(titleText);
+        titleText = parsed.text || titleText;
+        const title = titleText.replace(/[\n\r]+/g, ' ').trim().substring(0, 80) || 'New Chat';
         
         const res = await apiFetch('/api/conversations', {
             method: 'POST',
@@ -232,7 +262,8 @@ async function loadSessionsList() {
             div.className = `chat-item ${session.id === currentSessionId ? 'active' : ''}`;
             const titleSpan = document.createElement('span');
             titleSpan.className = 'chat-item-title';
-            titleSpan.textContent = session.title || 'New Chat';
+            const parsedTitle = parseStoredContent(session.title || '');
+            titleSpan.textContent = parsedTitle.text || session.title || 'New Chat';
             titleSpan.onclick = () => loadSession(session.id);
             const actionsDiv = document.createElement('div');
             actionsDiv.className = 'chat-item-actions';
@@ -281,8 +312,18 @@ async function loadSession(id) {
         const res = await apiFetch(`/api/conversations/${id}/messages`);
         if (!res.ok) return;
         const messages = await res.json();
+        cancelReply();
         currentSessionId = id;
-        currentChatHistory = messages.map(m => ({ sender: m.role === 'model' ? 'bot' : 'user', text: m.text }));
+        currentChatHistory = messages.map(m => {
+            const text = (typeof m.text === 'string') ? m.text : (typeof m.content === 'string' ? m.content : '');
+            const parsed = parseStoredContent(text);
+            return {
+                sender: m.role === 'model' ? 'bot' : 'user',
+                text: parsed.text,
+                id: m.id || parsed.id || generateMessageId(),
+                replyTo: m.replyTo || parsed.replyTo || null
+            };
+        });
         renderHistory();
         loadSessionsList();
         regenBtn.style.display = currentChatHistory.length > 0 && currentChatHistory[currentChatHistory.length-1]?.sender === 'bot' ? 'flex' : 'none';
@@ -303,6 +344,7 @@ function createNewSession() {
     welcomeScreen.style.display = 'flex';
     regenBtn.style.display = 'none';
     pendingFiles = [];
+    cancelReply();
     updateFilePreviewStrip();
     loadSessionsList();
     updateWelcomeGreeting();
@@ -361,6 +403,7 @@ if (attachBtn) attachBtn.addEventListener('click', toggleAttachMenu);
 document.addEventListener('click', (e) => { if (attachMenuOpen && !attachMenuContainer.contains(e.target)) closeAttachMenu(); });
 document.addEventListener('keydown', (e) => {
     if (e.key === 'Escape') {
+        if (replyToMessage) { cancelReply(); return; }
         if (attachMenuOpen) { closeAttachMenu(); return; }
         if (cameraModal && cameraModal.style.display !== 'none') { closeCamera(); return; }
         if (recentFilesModal && recentFilesModal.style.display !== 'none') { closeRecentFilesModal(); return; }
@@ -757,9 +800,11 @@ function buildFileAttachments(files) {
     return attachGrid;
 }
 
-function appendMessage(text, sender, finalRender = true, files = null) {
+function appendMessage(text, sender, finalRender = true, files = null, msgId = null, replyTo = null) {
+    if (!msgId) msgId = generateMessageId();
     const msgDiv = document.createElement('div');
     msgDiv.className = `message ${sender}`;
+    msgDiv.dataset.messageId = msgId;
     msgDiv.dataset.messageText = text;
     const avatar = document.createElement('div');
     avatar.className = 'message-avatar';
@@ -770,6 +815,23 @@ function appendMessage(text, sender, finalRender = true, files = null) {
     } else { avatar.innerHTML = '<img src="/icons/ai-avatar.svg" alt="VOSIL" class="bot-avatar-img">'; }
     const content = document.createElement('div');
     content.className = 'message-content';
+    // Quoted preview (replyTo)
+    if (replyTo && finalRender) {
+        const quotedMsg = getMessageById(replyTo);
+        if (quotedMsg) {
+            const quotedPreview = document.createElement('div');
+            quotedPreview.className = 'quoted-preview';
+            const senderName = quotedMsg.sender === 'user' ? (userName || 'User') : 'VOSIL';
+            const previewText = quotedMsg.text || '(empty)';
+            quotedPreview.innerHTML = `<div class="quoted-preview-label"><i class="fa-solid fa-reply"></i> Reply to ${senderName}</div>
+                <div class="quoted-preview-text">${escapeHtml(previewText.substring(0, 200))}</div>`;
+            quotedPreview.addEventListener('click', (e) => {
+                e.stopPropagation();
+                scrollToMessage(replyTo);
+            });
+            content.appendChild(quotedPreview);
+        }
+    }
     if (files && files.length > 0) { const attachGrid = buildFileAttachments(files); content.appendChild(attachGrid); }
     if (sender === 'user') {
         if (text && finalRender) { const textEl = document.createElement('div'); textEl.className = 'msg-text-content'; textEl.textContent = text; content.appendChild(textEl); }
@@ -783,17 +845,161 @@ function appendMessage(text, sender, finalRender = true, files = null) {
     contentWrapper.style.position = 'relative'; contentWrapper.style.display = 'flex'; contentWrapper.style.flexDirection = 'column';
     contentWrapper.style.alignItems = sender === 'user' ? 'flex-end' : 'flex-start'; contentWrapper.style.flex = '1'; contentWrapper.style.minWidth = '0';
     contentWrapper.appendChild(content);
+    // Desktop action bar (hover)
+    const actionBar = document.createElement('div');
+    actionBar.className = 'message-action-bar';
+    actionBar.innerHTML = `<button class="msg-action-bar-btn" data-action="reply" title="Reply"><i class="fa-solid fa-reply"></i> Reply</button>
+        <button class="msg-action-bar-btn" data-action="copy" title="Copy"><i class="fa-regular fa-copy"></i> Copy</button>`;
+    actionBar.querySelector('[data-action="reply"]').addEventListener('click', (e) => {
+        e.stopPropagation();
+        handleReplyClick(msgId);
+    });
+    if (text) {
+        actionBar.querySelector('[data-action="copy"]').addEventListener('click', (e) => {
+            e.stopPropagation();
+            copyMessageText(text);
+        });
+    } else {
+        actionBar.querySelector('[data-action="copy"]').style.display = 'none';
+    }
+    contentWrapper.appendChild(actionBar);
+    // Existing user message actions (kept for backward compat)
     if (sender === 'user') {
         const actionsDiv = document.createElement('div');
         actionsDiv.className = 'message-actions';
-        actionsDiv.innerHTML = `<button class="msg-action-btn" onclick="copyMessage('${text.replace(/'/g, '\\x27')}')" title="Copy"><i class="fa-regular fa-copy"></i></button>
+        const escapedText = (text || '').replace(/'/g, '\\x27');
+        actionsDiv.innerHTML = `<button class="msg-action-btn" onclick="copyMessage('${escapedText}')" title="Copy"><i class="fa-regular fa-copy"></i></button>
             <button class="msg-action-btn" onclick="editMessage(this)" title="Edit"><i class="fa-solid fa-pen"></i></button>`;
         contentWrapper.appendChild(actionsDiv);
     }
     msgDiv.appendChild(avatar); msgDiv.appendChild(contentWrapper);
+    // Long press for mobile context menu
+    let longPressTimer = null;
+    msgDiv.addEventListener('touchstart', (e) => {
+        longPressTimer = setTimeout(() => {
+            longPressTimer = null;
+            showMessageContextMenu(e, msgDiv, msgId, text, sender);
+        }, 500);
+    }, { passive: true });
+    msgDiv.addEventListener('touchend', () => {
+        if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+    }, { passive: true });
+    msgDiv.addEventListener('touchmove', () => {
+        if (longPressTimer) { clearTimeout(longPressTimer); longPressTimer = null; }
+    }, { passive: true });
     messagesWrapper.appendChild(msgDiv);
     chatContainer.scrollTop = chatContainer.scrollHeight;
     return msgDiv;
+}
+
+function escapeHtml(str) {
+    const div = document.createElement('div');
+    div.textContent = str;
+    return div.innerHTML;
+}
+
+function scrollToMessage(msgId) {
+    const targetMsg = document.querySelector(`[data-message-id="${msgId}"]`);
+    if (!targetMsg) return;
+    const wrapperRect = messagesWrapper.getBoundingClientRect();
+    const targetRect = targetMsg.getBoundingClientRect();
+    const offsetTop = targetRect.top - wrapperRect.top + messagesWrapper.parentElement.scrollTop - 20;
+    chatContainer.scrollTo({ top: offsetTop, behavior: 'smooth' });
+    targetMsg.classList.remove('highlight-flash');
+    void targetMsg.offsetWidth;
+    targetMsg.classList.add('highlight-flash');
+    setTimeout(() => targetMsg.classList.remove('highlight-flash'), 2000);
+}
+
+function showMessageContextMenu(e, msgDiv, msgId, text, sender) {
+    e.preventDefault();
+    const existingOverlay = document.querySelector('.context-menu-overlay');
+    if (existingOverlay) existingOverlay.remove();
+    const overlay = document.createElement('div');
+    overlay.className = 'context-menu-overlay';
+    const menu = document.createElement('div');
+    menu.className = 'context-menu';
+    const senderName = sender === 'user' ? (userName || 'User') : 'VOSIL';
+    menu.innerHTML = `<button class="context-menu-item" data-action="reply"><i class="fa-solid fa-reply"></i> Reply to ${senderName}</button>
+        <button class="context-menu-item" data-action="copy"><i class="fa-regular fa-copy"></i> Copy</button>`;
+    menu.querySelector('[data-action="reply"]').addEventListener('click', () => {
+        hideMessageContextMenu();
+        handleReplyClick(msgId);
+    });
+    const safeText = (text || '').replace(/'/g, '\\x27');
+    menu.querySelector('[data-action="copy"]').addEventListener('click', () => {
+        hideMessageContextMenu();
+        copyMessageText(text || '');
+    });
+    overlay.appendChild(menu);
+    document.body.appendChild(overlay);
+    const touchX = (e.touches && e.touches[0]) ? e.touches[0].clientX : e.clientX || 0;
+    const touchY = (e.touches && e.touches[0]) ? e.touches[0].clientY : e.clientY || 0;
+    requestAnimationFrame(() => {
+        const menuRect = menu.getBoundingClientRect();
+        let x = touchX;
+        let y = touchY;
+        if (x + menuRect.width > window.innerWidth - 10) x = window.innerWidth - menuRect.width - 10;
+        if (y + menuRect.height > window.innerHeight - 10) y = window.innerHeight - menuRect.height - 10;
+        if (x < 10) x = 10;
+        if (y < 10) y = 10;
+        menu.style.left = x + 'px';
+        menu.style.top = y + 'px';
+        menu.classList.add('visible');
+    });
+    overlay.addEventListener('click', (e) => {
+        if (e.target === overlay) hideMessageContextMenu();
+    });
+    overlay.addEventListener('touchstart', (e) => {
+        if (e.target === overlay) hideMessageContextMenu();
+    }, { passive: true });
+}
+
+function hideMessageContextMenu() {
+    const overlay = document.querySelector('.context-menu-overlay');
+    if (overlay) overlay.remove();
+}
+
+function handleReplyClick(msgId) {
+    const msg = getMessageById(msgId);
+    if (!msg) return;
+    replyToMessage = { id: msg.id, text: msg.text, sender: msg.sender };
+    showReplyPreview();
+    messageInput.focus();
+}
+
+function showReplyPreview() {
+    const existing = document.querySelector('.reply-preview');
+    if (existing) existing.remove();
+    if (!replyToMessage) return;
+    const preview = document.createElement('div');
+    preview.className = 'reply-preview';
+    preview.id = 'reply-preview';
+    const senderName = replyToMessage.sender === 'user' ? (userName || 'User') : 'VOSIL';
+    const previewText = replyToMessage.text || '(empty)';
+    preview.innerHTML = `<div class="reply-preview-content">
+            <div class="reply-preview-sender">${escapeHtml(senderName)}</div>
+            <div class="reply-preview-text">${escapeHtml(previewText.substring(0, 200))}</div>
+        </div>
+        <button class="reply-preview-cancel" id="reply-preview-cancel" title="Cancel reply"><i class="fa-solid fa-xmark"></i></button>`;
+    const inputArea = document.querySelector('.input-area');
+    inputArea.insertBefore(preview, inputArea.firstChild);
+    document.getElementById('reply-preview-cancel').addEventListener('click', cancelReply);
+}
+
+function cancelReply() {
+    replyToMessage = null;
+    const preview = document.querySelector('.reply-preview');
+    if (preview) preview.remove();
+}
+
+function copyMessageText(text) {
+    if (!text) return;
+    navigator.clipboard.writeText(text).then(() => {
+        showToast('Copied', 'success', 1500);
+    }).catch(() => {
+        showToast('Failed to copy', 'error');
+    });
 }
 
 function handleSend() {
@@ -806,6 +1012,7 @@ function handleSend() {
     messageInput.value = ''; messageInput.style.height = 'auto'; sendBtn.disabled = true;
 
     if (imageGenMode && text) {
+        cancelReply();
         imageGenMode = false;
         updateImageGenModeUI();
         handleImageGeneration(text);
@@ -813,16 +1020,23 @@ function handleSend() {
     }
 
     const filesForHistory = pendingFiles.map(f => { addRecentFile({ name: f.name, type: f.type, size: f.size }); return { name: f.name, type: f.type, size: f.size, preview: f.preview }; });
-    currentChatHistory.push({ text: text, sender: 'user', files: filesForHistory });
+    const replyTarget = replyToMessage;
+    const replyInfo = {};
+    if (replyTarget) {
+        replyInfo.replyTo = replyTarget.id;
+        replyInfo.replyToContent = replyTarget.text || '';
+    }
+    currentChatHistory.push({ id: generateMessageId(), text: text, sender: 'user', files: filesForHistory, replyTo: replyTarget?.id || null });
+    cancelReply();
     renderHistory();
-    if (pendingFiles.length > 0) preprocessAndSend(text, pendingFiles);
-    else { sendMessage(text, [], false); clearPendingFiles(); }
+    if (pendingFiles.length > 0) preprocessAndSend(text, pendingFiles, replyInfo);
+    else { sendMessage(text, [], false, null, replyInfo); clearPendingFiles(); }
 }
 
 function renderHistory() {
     messagesWrapper.innerHTML = '';
     welcomeScreen.style.display = currentChatHistory.length === 0 ? 'flex' : 'none';
-    currentChatHistory.forEach(msg => { const msgDiv = appendMessage(msg.text, msg.sender, true, msg.files); });
+    currentChatHistory.forEach(msg => { appendMessage(msg.text, msg.sender, true, msg.files, msg.id, msg.replyTo); });
     chatContainer.scrollTop = chatContainer.scrollHeight;
 }
 
@@ -889,7 +1103,7 @@ async function convertFilesToInlineData(files) {
     return { inlineDataArray, fileInfoArray };
 }
 
-async function preprocessAndSend(text, files) {
+async function preprocessAndSend(text, files, replyInfo = {}) {
     isProcessingFiles = true;
     setUploadingState(true);
     updateSendButton();
@@ -908,7 +1122,7 @@ async function preprocessAndSend(text, files) {
         clearPendingFiles();
         
         // Send message with inline data
-        await sendMessage(text, inlineDataArray, false, fileInfoArray);
+        await sendMessage(text, inlineDataArray, false, fileInfoArray, replyInfo);
     } catch (error) {
         console.error('[Preprocess] Error:', error);
         showToast('File processing error: ' + error.message, 'error');
@@ -918,12 +1132,12 @@ async function preprocessAndSend(text, files) {
     }
 }
 
-async function sendMessage(text, inlineDataOrFiles = [], isRegenerate = false, processedFiles = null) {
+async function sendMessage(text, inlineDataOrFiles = [], isRegenerate = false, processedFiles = null, replyInfo = {}) {
     isGenerating = true;
     regenBtn.style.display = 'none'; stopBtn.style.display = 'flex';
     if (welcomeScreen.style.display !== 'none') welcomeScreen.style.display = 'none';
     chatContainer.scrollTop = chatContainer.scrollHeight;
-    const botMsgDiv = appendMessage('', 'bot', false);
+    const botMsgDiv = appendMessage('', 'bot', false, null, generateMessageId());
     const contentDiv = botMsgDiv.querySelector('.message-content');
     contentDiv.innerHTML = '<div class="typing-indicator"><span></span><span></span><span></span></div>';
     abortController = new AbortController();
@@ -948,7 +1162,9 @@ async function sendMessage(text, inlineDataOrFiles = [], isRegenerate = false, p
                 userLocation: userLocation || '',
                 model: 'gemini-2.5-flash',
                 temperature: 0.7,
-                inlineData: inlineDataOrFiles
+                inlineData: inlineDataOrFiles,
+                replyTo: replyInfo.replyTo || null,
+                replyToContent: replyInfo.replyToContent || null
             };
             
             console.log('[Chat] Sending message with inline data:', inlineDataOrFiles.length, 'files');
@@ -972,6 +1188,8 @@ async function sendMessage(text, inlineDataOrFiles = [], isRegenerate = false, p
             formData.append('userLocation', userLocation || '');
             formData.append('model', 'gemini-2.5-flash');
             formData.append('temperature', '0.7');
+            formData.append('replyTo', replyInfo.replyTo || '');
+            formData.append('replyToContent', replyInfo.replyToContent || '');
             
             for (const f of inlineDataOrFiles) {
                 formData.append('files', f.file, f.name);
@@ -992,6 +1210,8 @@ async function sendMessage(text, inlineDataOrFiles = [], isRegenerate = false, p
             formData.append('userLocation', userLocation || '');
             formData.append('model', 'gemini-2.5-flash');
             formData.append('temperature', '0.7');
+            formData.append('replyTo', replyInfo.replyTo || '');
+            formData.append('replyToContent', replyInfo.replyToContent || '');
             formData.append('processedFiles', JSON.stringify(processedFiles));
             
             response = await fetch('/api/chat', {
@@ -1011,7 +1231,9 @@ async function sendMessage(text, inlineDataOrFiles = [], isRegenerate = false, p
                     userGender,
                     userLocation: userLocation || '',
                     model: 'gemini-2.5-flash',
-                    temperature: 0.7
+                    temperature: 0.7,
+                    replyTo: replyInfo.replyTo || null,
+                    replyToContent: replyInfo.replyToContent || null
                 }),
                 signal: abortController.signal
             });
@@ -1059,13 +1281,13 @@ async function sendMessage(text, inlineDataOrFiles = [], isRegenerate = false, p
                 }
             }
         }
-        if (!isRegenerate) { currentChatHistory.push({ text: fullResponse, sender: 'bot' }); saveSession(); }
-        else if (isGenerating) { currentChatHistory.push({ text: fullResponse, sender: 'bot' }); saveSession(); }
+        if (!isRegenerate) { currentChatHistory.push({ id: generateMessageId(), text: fullResponse, sender: 'bot' }); saveSession(); }
+        else if (isGenerating) { currentChatHistory.push({ id: generateMessageId(), text: fullResponse, sender: 'bot' }); saveSession(); }
     } catch (error) {
         if (hasFiles) setUploadingState(false);
-        if (error.name === 'AbortError') { const stoppedMsg = fullResponse + '\n\n*(Stopped)*'; currentChatHistory.push({ text: stoppedMsg, sender: 'bot' }); saveSession(); fullResponse = stoppedMsg; }
+        if (error.name === 'AbortError') { const stoppedMsg = fullResponse + '\n\n*(Stopped)*'; currentChatHistory.push({ id: generateMessageId(), text: stoppedMsg, sender: 'bot' }); saveSession(); fullResponse = stoppedMsg; }
         else {
-            if (fullResponse) { const interruptedMsg = fullResponse + '\n\n*(Connection lost)*'; const rawHtml = typeof marked !== 'undefined' ? marked.parse(interruptedMsg) : interruptedMsg; contentDiv.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(rawHtml) : rawHtml; formatCodeBlocks(contentDiv); currentChatHistory.push({ text: interruptedMsg, sender: 'bot' }); saveSession(); fullResponse = interruptedMsg; }
+            if (fullResponse) { const interruptedMsg = fullResponse + '\n\n*(Connection lost)*'; const rawHtml = typeof marked !== 'undefined' ? marked.parse(interruptedMsg) : interruptedMsg; contentDiv.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(rawHtml) : rawHtml; formatCodeBlocks(contentDiv); currentChatHistory.push({ id: generateMessageId(), text: interruptedMsg, sender: 'bot' }); saveSession(); fullResponse = interruptedMsg; }
             else { contentDiv.innerHTML = '<span style="color: #ef4444;">❌ Network error. Please try again.</span>'; fullResponse = 'Network error'; }
             console.error('Chat error:', error);
         }
@@ -1082,7 +1304,7 @@ async function sendMessage(text, inlineDataOrFiles = [], isRegenerate = false, p
 
 function stopGeneration() { if (abortController) { abortController.abort(); isGenerating = false; if (stopBtn) stopBtn.style.display = 'none'; if (regenBtn) regenBtn.style.display = 'flex'; saveSession(); } }
 if (stopBtn) stopBtn.addEventListener('click', stopGeneration);
-if (regenBtn) regenBtn.addEventListener('click', () => { if (currentChatHistory.length >= 2 && currentChatHistory[currentChatHistory.length - 1].sender === 'bot') { currentChatHistory.pop(); const lastUserMsg = currentChatHistory[currentChatHistory.length - 1]; renderHistory(); sendMessage(lastUserMsg.text, [], true); } });
+if (regenBtn) regenBtn.addEventListener('click', () => { if (currentChatHistory.length >= 2 && currentChatHistory[currentChatHistory.length - 1].sender === 'bot') { currentChatHistory.pop(); const lastUserMsg = currentChatHistory[currentChatHistory.length - 1]; renderHistory(); sendMessage(lastUserMsg.text, [], true, null, {}); } });
 
 if (messageInput) messageInput.addEventListener('input', function() {
     this.style.height = 'auto'; this.style.height = (this.scrollHeight) + 'px'; this.style.overflowY = this.scrollHeight > 150 ? 'auto' : 'hidden'; updateSendButton();
@@ -1107,7 +1329,7 @@ window.saveEditedMessage = function(btn) {
     const msgDiv = btn.closest('.message'); const textarea = msgDiv.querySelector('.msg-edit-textarea'); const newText = textarea.value.trim();
     if (!newText) return;
     const msgIndex = Array.from(messagesWrapper.children).indexOf(msgDiv);
-    if (msgIndex >= 0) { currentChatHistory.splice(msgIndex, currentChatHistory.length - msgIndex); renderHistory(); messageInput.value = newText; handleSend(); }
+    if (msgIndex >= 0) { currentChatHistory.splice(msgIndex, currentChatHistory.length - msgIndex); cancelReply(); renderHistory(); messageInput.value = newText; handleSend(); }
 };
 
 window.cancelEditMessage = function(btn) {
@@ -1149,8 +1371,8 @@ async function handleImageGeneration(prompt) {
     const filesForHistory = pendingFiles.map(f => ({
         name: f.name, type: f.type, size: f.size, preview: f.preview,
     }));
-    currentChatHistory.push({ text: prompt, sender: 'user', files: filesForHistory });
-    currentChatHistory.push({ text: '', sender: 'bot', files: [], _generating: true });
+    currentChatHistory.push({ id: generateMessageId(), text: prompt, sender: 'user', files: filesForHistory });
+    currentChatHistory.push({ id: generateMessageId(), text: '', sender: 'bot', files: [], _generating: true });
     clearPendingFiles();
     renderHistory();
 
@@ -1158,7 +1380,7 @@ async function handleImageGeneration(prompt) {
         const generatingIdx = currentChatHistory.findIndex(e => e._generating);
         if (generatingIdx !== -1) currentChatHistory.splice(generatingIdx, 1);
         currentChatHistory.push({
-            text: '⚠️ **Image editing is currently unavailable.**',
+            id: generateMessageId(), text: '⚠️ **Image editing is currently unavailable.**',
             sender: 'bot',
             files: [],
         });
@@ -1207,7 +1429,7 @@ async function handleImageGeneration(prompt) {
         const generatingIdx = currentChatHistory.findIndex(e => e._generating);
         if (generatingIdx !== -1) currentChatHistory.splice(generatingIdx, 1);
         currentChatHistory.push({
-            text: `⚠️ **Generation failed:** ${err.message}`,
+            id: generateMessageId(), text: `⚠️ **Generation failed:** ${err.message}`,
             sender: 'bot', files: [],
         });
         renderHistory();

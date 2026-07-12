@@ -2324,3 +2324,265 @@ body {
     padding: 12px 20px;
   }
 }
+
+/* ============================================================
+   REPLY SYSTEM
+   ============================================================ */
+
+/* Reply Preview above input */
+.reply-preview {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 8px 14px;
+  background: var(--bg-glass);
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  border: 1px solid var(--border-glass);
+  border-radius: var(--radius-md) var(--radius-md) 0 0;
+  max-width: var(--input-max-width);
+  margin: 0 auto;
+  width: 100%;
+  animation: replyPreviewIn 0.25s var(--ease-out);
+  border-bottom: none;
+  margin-bottom: -1px;
+  position: relative;
+  z-index: 5;
+}
+
+.reply-preview-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  white-space: nowrap;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+
+.reply-preview-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.reply-preview-sender {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--accent);
+}
+
+.reply-preview-text {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 1.4;
+}
+
+.reply-preview-cancel {
+  background: none;
+  border: none;
+  color: var(--text-tertiary);
+  width: 24px;
+  height: 24px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 14px;
+  flex-shrink: 0;
+  margin-top: 2px;
+  transition: background 0.2s var(--ease-out), color 0.2s var(--ease-out);
+}
+
+.reply-preview-cancel:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: var(--text-primary);
+}
+
+@keyframes replyPreviewIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* Quoted Preview inside messages */
+.quoted-preview {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 10px;
+  margin-bottom: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border-left: 3px solid var(--accent);
+  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+  cursor: pointer;
+  transition: background 0.2s var(--ease-out);
+}
+
+.quoted-preview:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.quoted-preview-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.quoted-preview-label i {
+  font-size: 10px;
+}
+
+.quoted-preview-text {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  -webkit-box-orient: vertical;
+  line-height: 1.4;
+}
+
+/* Highlight animation */
+.message.highlight-flash {
+  animation: highlightFlash 1.5s var(--ease-out);
+}
+
+@keyframes highlightFlash {
+  0% {
+    background-color: rgba(217, 217, 217, 0.1);
+  }
+  50% {
+    background-color: rgba(217, 217, 217, 0.18);
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+/* Context Menu (mobile long press) */
+.context-menu-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 500;
+  background: transparent;
+}
+
+.context-menu {
+  position: fixed;
+  z-index: 501;
+  background: var(--bg-glass-heavy);
+  backdrop-filter: blur(24px) saturate(1.4);
+  -webkit-backdrop-filter: blur(24px) saturate(1.4);
+  border: 1px solid var(--border-glass-strong);
+  border-radius: var(--radius-md);
+  padding: 6px;
+  min-width: 180px;
+  opacity: 0;
+  transform: scale(0.92);
+  pointer-events: none;
+  transition: opacity 0.2s var(--ease-out), transform 0.2s var(--ease-out);
+}
+
+.context-menu.visible {
+  opacity: 1;
+  transform: scale(1);
+  pointer-events: auto;
+}
+
+.context-menu-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  background: none;
+  border-radius: 10px;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 14px;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  text-align: left;
+  transition: background 0.15s var(--ease-out);
+}
+
+.context-menu-item:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.context-menu-item i {
+  width: 18px;
+  text-align: center;
+  font-size: 15px;
+  color: var(--text-secondary);
+}
+
+/* Desktop Action Bar (appears below message on hover) */
+.message-action-bar {
+  display: flex;
+  gap: 2px;
+  padding: 2px 4px;
+  margin-top: 2px;
+  opacity: 0;
+  transition: opacity 0.15s var(--ease-out);
+  pointer-events: none;
+}
+
+.message-content-wrapper:hover .message-action-bar {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.message.user .message-action-bar {
+  justify-content: flex-end;
+}
+
+.msg-action-bar-btn {
+  background: none;
+  border: none;
+  color: rgba(255, 255, 255, 0.4);
+  padding: 3px 8px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-family: var(--font-sans);
+  transition: background 0.15s var(--ease-out), color 0.15s var(--ease-out);
+}
+
+.msg-action-bar-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: rgba(255, 255, 255, 0.9);
+}
+
+/* Hide desktop action bar on mobile, hide context menu on desktop */
+@media (max-width: 768px) {
+  .message-action-bar {
+    display: none !important;
+  }
+}
+
+@media (min-width: 769px) {
+  .context-menu-overlay,
+  .context-menu {
+    display: none !important;
+  }
+}
