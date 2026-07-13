@@ -1403,6 +1403,52 @@ body {
   cursor: not-allowed;
 }
 
+.stop-send-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: 7px;
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 13px;
+  flex-shrink: 0;
+  transition: background 0.2s var(--ease-out);
+  line-height: 0;
+  padding: 0;
+}
+
+.stop-send-btn:hover {
+  background: var(--accent-hover);
+}
+
+/* Regenerate button below AI message */
+.btn-regen-message {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 14px;
+  margin-top: 10px;
+  border: 1px solid var(--border-glass);
+  border-radius: 9999px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  font-family: var(--font-sans);
+  transition: background 0.2s var(--ease-out), color 0.2s var(--ease-out);
+  line-height: 1;
+}
+
+.btn-regen-message:hover {
+  background: var(--bg-glass);
+  color: var(--text-primary);
+}
+
 .disclaimer {
   text-align: center;
   font-size: 11px;
@@ -2142,7 +2188,8 @@ body {
     font-size: 15px;
   }
 
-  .send-btn {
+  .send-btn,
+  .stop-send-btn {
     width: 36px;
     height: 36px;
     font-size: 15px;
@@ -2290,7 +2337,8 @@ body {
     font-size: 16px;
   }
 
-  .send-btn {
+  .send-btn,
+  .stop-send-btn {
     width: 40px;
     height: 40px;
     font-size: 16px;
@@ -2585,4 +2633,57 @@ body {
   .context-menu {
     display: none !important;
   }
+}
+
+/* ============================================================
+   SCROLL TO BOTTOM BUTTON
+   ============================================================ */
+
+.btn-scroll-bottom {
+  position: absolute;
+  right: 20px;
+  bottom: 90px;
+  z-index: 15;
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border: 1px solid var(--border-glass-strong);
+  background: var(--bg-glass-heavy);
+  backdrop-filter: blur(20px) saturate(1.4);
+  -webkit-backdrop-filter: blur(20px) saturate(1.4);
+  color: var(--text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0;
+  transform: scale(0.8);
+  pointer-events: none;
+  transition: opacity 0.2s var(--ease-out), transform 0.2s var(--ease-out), box-shadow 0.2s var(--ease-out), color 0.2s var(--ease-out);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  padding: 0;
+  line-height: 0;
+  font-size: 0;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.btn-scroll-bottom.visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: scale(1);
+}
+
+.btn-scroll-bottom:hover {
+  color: var(--text-primary);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+}
+
+.btn-scroll-bottom:active {
+  transform: scale(0.92);
+}
+
+.btn-scroll-bottom svg {
+  width: 20px;
+  height: 20px;
+  display: block;
 }

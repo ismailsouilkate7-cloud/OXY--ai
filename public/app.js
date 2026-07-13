@@ -11,8 +11,7 @@ const typingIndicator = document.getElementById('typing-indicator');
 const chatContainer = document.getElementById('chat-container');
 const mobileMenuBtn = document.getElementById('mobile-menu-btn');
 const sidebar = document.querySelector('.sidebar');
-const stopBtn = document.getElementById('stop-btn');
-const regenBtn = document.getElementById('regen-btn');
+const stopSendBtn = document.getElementById('stop-send-btn');
 const chatList = document.getElementById('chat-list');
 const clearChatBtn = document.getElementById('clear-chat-btn');
 const shareBtn = document.getElementById('share-btn');
@@ -326,7 +325,10 @@ async function loadSession(id) {
         });
         renderHistory();
         loadSessionsList();
-        regenBtn.style.display = currentChatHistory.length > 0 && currentChatHistory[currentChatHistory.length-1]?.sender === 'bot' ? 'flex' : 'none';
+        const lastRegenBtn = document.querySelector('.message.bot:last-child .btn-regen-message');
+        if (lastRegenBtn) {
+            lastRegenBtn.style.display = currentChatHistory.length > 0 && currentChatHistory[currentChatHistory.length-1]?.sender === 'bot' ? 'flex' : 'none';
+        }
         if (window.innerWidth <= 1024) closeSidebar();
     } catch (err) { console.error('Failed to load session', err); }
 }
@@ -342,7 +344,7 @@ function createNewSession() {
     currentChatHistory = [];
     messagesWrapper.innerHTML = '';
     welcomeScreen.style.display = 'flex';
-    regenBtn.style.display = 'none';
+    document.querySelectorAll('.btn-regen-message').forEach(b => b.style.display = 'none');
     pendingFiles = [];
     cancelReply();
     updateFilePreviewStrip();
@@ -419,7 +421,7 @@ if (menuRecent) menuRecent.addEventListener('click', () => { closeAttachMenu(); 
 
 if (fileInput) fileInput.addEventListener('change', (e) => {
     if (e.target.files.length > 0) {
-        const sendBtn = document.getElementById('send-btn');
+const sendBtn = document.getElementById('send-btn');
         const msgInput = document.getElementById('message-input');
         sendBtn.disabled = true;
         msgInput.disabled = true;
@@ -872,6 +874,21 @@ function appendMessage(text, sender, finalRender = true, files = null, msgId = n
             <button class="msg-action-btn" onclick="editMessage(this)" title="Edit"><i class="fa-solid fa-pen"></i></button>`;
         contentWrapper.appendChild(actionsDiv);
     }
+    if (sender === 'bot' && finalRender) {
+        const regenBtnEl = document.createElement('button');
+        regenBtnEl.className = 'btn-regen-message';
+        regenBtnEl.innerHTML = '<i class="fa-solid fa-rotate-right"></i> Regenerate';
+        regenBtnEl.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (currentChatHistory.length >= 2 && currentChatHistory[currentChatHistory.length - 1]?.sender === 'bot') {
+                currentChatHistory.pop();
+                const lastUserMsg = currentChatHistory[currentChatHistory.length - 1];
+                renderHistory();
+                sendMessage(lastUserMsg.text, [], true, null, {});
+            }
+        });
+        contentWrapper.appendChild(regenBtnEl);
+    }
     msgDiv.appendChild(avatar); msgDiv.appendChild(contentWrapper);
     // Long press for mobile context menu
     let longPressTimer = null;
@@ -1134,7 +1151,8 @@ async function preprocessAndSend(text, files, replyInfo = {}) {
 
 async function sendMessage(text, inlineDataOrFiles = [], isRegenerate = false, processedFiles = null, replyInfo = {}) {
     isGenerating = true;
-    regenBtn.style.display = 'none'; stopBtn.style.display = 'flex';
+    sendBtn.style.display = 'none'; if (stopSendBtn) stopSendBtn.style.display = 'flex';
+    document.querySelectorAll('.btn-regen-message').forEach(b => b.style.display = 'none');
     if (welcomeScreen.style.display !== 'none') welcomeScreen.style.display = 'none';
     chatContainer.scrollTop = chatContainer.scrollHeight;
     const botMsgDiv = appendMessage('', 'bot', false, null, generateMessageId());
@@ -1296,15 +1314,16 @@ async function sendMessage(text, inlineDataOrFiles = [], isRegenerate = false, p
         // Ensure uploading state is always reset and send button re-enabled
         setUploadingState(false);
         updateSendButton();
-        stopBtn.style.display = 'none'; regenBtn.style.display = 'flex';
+        if (stopSendBtn) stopSendBtn.style.display = 'none'; sendBtn.style.display = 'flex';
+        const doneRegenBtn = document.querySelector('.message.bot:last-child .btn-regen-message');
+        if (doneRegenBtn) doneRegenBtn.style.display = 'flex';
         if (fullResponse) { const widgetResult = typeof OXYWidgetRenderer !== 'undefined' ? OXYWidgetRenderer.detectAndRender(fullResponse) : null; if (widgetResult) contentDiv.innerHTML = `<div class="oxy-widget-container">${widgetResult.html}</div>`; else { const rawHtml = typeof marked !== 'undefined' ? marked.parse(fullResponse) : fullResponse; contentDiv.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(rawHtml) : rawHtml; formatCodeBlocks(contentDiv); } }
         chatContainer.scrollTop = chatContainer.scrollHeight;
     }
 }
 
-function stopGeneration() { if (abortController) { abortController.abort(); isGenerating = false; if (stopBtn) stopBtn.style.display = 'none'; if (regenBtn) regenBtn.style.display = 'flex'; saveSession(); } }
-if (stopBtn) stopBtn.addEventListener('click', stopGeneration);
-if (regenBtn) regenBtn.addEventListener('click', () => { if (currentChatHistory.length >= 2 && currentChatHistory[currentChatHistory.length - 1].sender === 'bot') { currentChatHistory.pop(); const lastUserMsg = currentChatHistory[currentChatHistory.length - 1]; renderHistory(); sendMessage(lastUserMsg.text, [], true, null, {}); } });
+function stopGeneration() { if (abortController) { abortController.abort(); isGenerating = false; if (stopSendBtn) stopSendBtn.style.display = 'none'; sendBtn.style.display = 'flex'; const stopRegenBtn = document.querySelector('.message.bot:last-child .btn-regen-message'); if (stopRegenBtn) stopRegenBtn.style.display = 'flex'; saveSession(); } }
+if (stopSendBtn) stopSendBtn.addEventListener('click', stopGeneration);
 
 if (messageInput) messageInput.addEventListener('input', function() {
     this.style.height = 'auto'; this.style.height = (this.scrollHeight) + 'px'; this.style.overflowY = this.scrollHeight > 150 ? 'auto' : 'hidden'; updateSendButton();
@@ -1480,6 +1499,42 @@ if ('serviceWorker' in navigator) {
     }
     fetch('/api/health', { cache: 'no-store' }).then(r => { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); }).then(data => { console.log('[Health] Backend OK on port', data.port, '— uptime', data.uptime.toFixed(0) + 's'); }).catch(err => { const port = window.location.port || (window.location.protocol === 'https:' ? 443 : 80); const host = window.location.hostname || 'localhost'; showBanner(`Backend not reachable at http://${host}:${port}. Run \`npm start\` in the project folder. (${err.message})`); });
 })();
+
+// === SCROLL TO BOTTOM BUTTON ===
+const scrollBottomBtn = document.createElement('button');
+scrollBottomBtn.className = 'btn-scroll-bottom';
+scrollBottomBtn.setAttribute('aria-label', 'Scroll to bottom');
+scrollBottomBtn.innerHTML = `<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="m5 12 7 7 7-7"/></svg>`;
+document.querySelector('.input-area').appendChild(scrollBottomBtn);
+
+const STB_THRESHOLD = 100;
+function updateScrollBtnPos() {
+    const inputArea = document.querySelector('.input-area');
+    const sendBtnEl = document.getElementById('send-btn');
+    if (inputArea && sendBtnEl) {
+        const inputRect = inputArea.getBoundingClientRect();
+        const sendRect = sendBtnEl.getBoundingClientRect();
+        const rightOffset = Math.max(12, inputRect.right - sendRect.right);
+        scrollBottomBtn.style.bottom = (inputArea.offsetHeight + 14) + 'px';
+        scrollBottomBtn.style.right = rightOffset + 'px';
+    }
+}
+function toggleScrollBottomBtn() {
+    const atBottom = chatContainer.scrollHeight - chatContainer.scrollTop - chatContainer.clientHeight < STB_THRESHOLD;
+    scrollBottomBtn.classList.toggle('visible', !atBottom);
+}
+chatContainer.addEventListener('scroll', toggleScrollBottomBtn, { passive: true });
+scrollBottomBtn.addEventListener('click', () => {
+    chatContainer.scrollTo({ top: chatContainer.scrollHeight, behavior: 'smooth' });
+    scrollBottomBtn.classList.remove('visible');
+});
+const inputAreaEl = document.querySelector('.input-area');
+if (inputAreaEl) {
+    const ro = new ResizeObserver(() => updateScrollBtnPos());
+    ro.observe(inputAreaEl);
+}
+window.addEventListener('resize', updateScrollBtnPos);
+updateScrollBtnPos();
 
 function initApp() {
     try {
