@@ -590,7 +590,6 @@ body {
   display: flex;
   gap: 10px;
   animation: messageIn 0.4s var(--ease-out);
-  max-width: 88%;
 }
 
 @keyframes messageIn {
@@ -607,10 +606,13 @@ body {
 .message.user {
   align-self: flex-end;
   flex-direction: row-reverse;
+  max-width: 70%;
 }
 
 .message.bot {
   align-self: flex-start;
+  max-width: 100%;
+  width: 100%;
 }
 
 .message-avatar {
@@ -668,9 +670,12 @@ body {
 }
 
 .message.bot .message-content {
-  background: var(--bg-glass);
-  border: 1px solid var(--border-glass);
-  border-radius: var(--radius-xs) var(--radius-lg) var(--radius-lg) var(--radius-lg);
+  background: none;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  width: 100%;
+  min-width: 0;
   color: var(--text-primary);
 }
 
@@ -810,64 +815,81 @@ body {
 
 .code-block-wrapper {
   margin: 10px 0;
-  border-radius: var(--radius-sm);
+  border-radius: 8px;
   overflow: hidden;
-  border: 1px solid var(--border-glass);
-  background: rgba(0, 0, 0, 0.25);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #1e1e1e;
 }
 
 .code-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 8px 14px;
-  background: rgba(0, 0, 0, 0.2);
-  border-bottom: 1px solid var(--border-glass);
-  font-size: 12px;
-  color: var(--text-tertiary);
+  padding: 7px 14px;
+  background: rgba(0, 0, 0, 0.3);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
 .code-header span {
-  text-transform: lowercase;
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: 12px;
+  color: rgba(255, 255, 255, 0.5);
+  text-transform: lowercase;
 }
 
 .copy-btn {
   background: none;
   border: none;
-  color: rgba(255, 255, 255, 0.5);
+  color: rgba(255, 255, 255, 0.4);
   font-size: 11px;
   cursor: pointer;
   display: flex;
   align-items: center;
   gap: 5px;
-  padding: 4px 8px;
-  border-radius: 6px;
-  transition: background 0.2s var(--ease-out);
+  padding: 3px 8px;
+  border-radius: 4px;
+  transition: background 0.15s var(--ease-out), color 0.15s var(--ease-out);
   font-family: var(--font-sans);
 }
 
 .copy-btn:hover {
-  background: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.08);
   color: rgba(255, 255, 255, 0.9);
 }
 
 .copy-btn.copied {
-  color: var(--success);
+  color: #2ea875;
 }
 
 .code-block-wrapper pre {
   margin: 0;
   padding: 14px 18px;
   overflow-x: auto;
+  background: #1e1e1e;
 }
 
 .code-block-wrapper code {
   font-family: var(--font-mono);
   font-size: 13px;
-  line-height: 1.7;
+  line-height: 1.5;
   color: #e2e2ea;
+}
+
+.code-block-wrapper pre::-webkit-scrollbar {
+  height: 6px;
+}
+
+.code-block-wrapper pre::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.code-block-wrapper pre::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 3px;
+}
+
+.code-block-wrapper pre::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
 }
 
 #typing-indicator {
@@ -2139,13 +2161,7 @@ body {
   }
 
   .message {
-    max-width: 94%;
     gap: 8px;
-  }
-
-  .message-content {
-    font-size: 14px;
-    padding: 10px 14px;
   }
 
   .welcome-screen {
@@ -2169,16 +2185,32 @@ body {
     padding: 0 12px calc(10px + env(safe-area-inset-bottom, 0px));
   }
 
+  .message-avatar {
+    width: 34px;
+    height: 34px;
+    font-size: 12px;
+  }
+
+  .message.bot .message-avatar {
+    width: 40px;
+    height: 40px;
+  }
+
+  .message-content {
+    font-size: 15px;
+    padding: 12px 16px;
+  }
+
   .input-wrapper {
-    padding: 10px 8px 10px 16px;
-    border-radius: 24px;
-    gap: 8px;
-    min-height: 56px;
+    padding: 6px 6px 6px 14px;
+    border-radius: 22px;
+    gap: 6px;
+    min-height: 48px;
   }
 
   #message-input {
-    font-size: 15px;
-    max-height: 150px;
+    font-size: 16px;
+    max-height: 120px;
   }
 
   .attach-btn,
@@ -2202,8 +2234,7 @@ body {
   }
 
   .disclaimer {
-    font-size: 10px;
-    padding: 8px 12px 0;
+    display: none;
   }
 
   .sidebar {
@@ -2246,24 +2277,23 @@ body {
   }
 
   .message {
-    max-width: 97%;
     gap: 6px;
   }
 
   .message-avatar {
-    width: 26px;
-    height: 26px;
-    font-size: 10px;
+    width: 32px;
+    height: 32px;
+    font-size: 12px;
   }
 
   .message.bot .message-avatar {
-    width: 32px;
-    height: 32px;
+    width: 38px;
+    height: 38px;
   }
 
   .message-content {
-    font-size: 13px;
-    padding: 10px 14px;
+    font-size: 15px;
+    padding: 12px 14px;
   }
 
   .welcome-screen {
@@ -2319,29 +2349,33 @@ body {
   .input-wrapper {
     width: calc(100% - 12px);
     max-width: none;
-    min-height: 56px;
-    padding: 8px 8px 8px 14px;
-    border-radius: 22px;
-    gap: 6px;
+    min-height: 46px;
+    padding: 5px 5px 5px 12px;
+    border-radius: 20px;
+    gap: 4px;
   }
 
   #message-input {
     font-size: 16px;
-    max-height: 140px;
+    max-height: 120px;
   }
 
   .attach-btn,
   .sparkle-btn {
-    width: 40px;
-    height: 40px;
-    font-size: 16px;
+    width: 36px;
+    height: 36px;
+    font-size: 15px;
   }
 
   .send-btn,
   .stop-send-btn {
-    width: 40px;
-    height: 40px;
-    font-size: 16px;
+    width: 36px;
+    height: 36px;
+    font-size: 15px;
+  }
+
+  .code-block-wrapper {
+    border-radius: 6px;
   }
 
   .code-block-wrapper pre {
@@ -2350,6 +2384,19 @@ body {
 
   .code-block-wrapper code {
     font-size: 12px;
+  }
+
+  .code-header {
+    padding: 5px 10px;
+  }
+
+  .code-header span {
+    font-size: 11px;
+  }
+
+  .copy-btn {
+    padding: 2px 6px;
+    font-size: 10px;
   }
 
   .toast {

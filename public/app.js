@@ -1331,7 +1331,7 @@ if (messageInput) messageInput.addEventListener('input', function() {
 if (messageInput) messageInput.addEventListener('keydown', function(e) { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); if (sendBtn && !sendBtn.disabled && !isGenerating) handleSend(); } });
 if (sendBtn) sendBtn.addEventListener('click', handleSend);
 
-window.copyCode = function(btn) { const wrapper = btn.closest('.code-block-wrapper'); const code = wrapper.querySelector('code').innerText; navigator.clipboard.writeText(code).then(() => { btn.classList.add('copied'); const originalHtml = btn.innerHTML; btn.innerHTML = '<i class="fa-regular fa-clipboard"></i> Copied!'; setTimeout(() => { btn.classList.remove('copied'); btn.innerHTML = originalHtml; }, 2000); }); };
+window.copyCode = function(btn) { const wrapper = btn.closest('.code-block-wrapper'); const code = wrapper.querySelector('code').innerText; navigator.clipboard.writeText(code).then(() => { btn.classList.add('copied'); const originalHtml = btn.innerHTML; btn.innerHTML = '<i class="fa-regular fa-check"></i> Copied!'; setTimeout(() => { btn.classList.remove('copied'); btn.innerHTML = originalHtml; }, 1500); }); };
 window.copyMessage = function(text) { navigator.clipboard.writeText(text).then(() => showToast('Message copied', 'success')).catch(() => showToast('Failed to copy', 'error')); };
 
 window.editMessage = function(btn) {
