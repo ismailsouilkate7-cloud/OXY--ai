@@ -12,12 +12,96 @@ import cookieParser from 'cookie-parser';
 import fs from 'fs';
 
 import crypto from 'crypto';
+import jwt from 'jsonwebtoken';
 import { initializeApp, getApps, cert } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
+import { getFirestore } from 'firebase-admin/firestore';
 import { createClient } from '@supabase/supabase-js';
 import pool, { initDb, isDatabaseReady, getDbDiagnostics } from './db.js';
 
 dotenv.config();
+
+// ============================================================
+// VOSIL PASSWORD AUTHENTICATION SYSTEM
+// ============================================================
+const VOSIL_PASSWORD = process.env.VOSIL_PASSWORD;
+const SESSION_COOKIE_NAME = 'vosil_session';
+const SESSION_EXPIRY = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
+const SESSION_STORE = new Map(); // In-memory session store (consider persistent store for production)
+
+if (!VOSIL_PASSWORD) {
+    console.error('[Auth] ❌ VOSIL_PASSWORD not set in .env — authentication will be disabled!');
+} else {
+    console.log('[Auth] ✅ VOSIL password authentication enabled');
+}
+
+// Session management helpers
+function createSession() {
+    const sessionId = crypto.randomBytes(32).toString('hex');
+    const createdAt = Date.now();
+    const expiresAt = createdAt + SESSION_EXPIRY;
+    SESSION_STORE.set(sessionId, { createdAt, expiresAt });
+    
+    // Cleanup expired sessions
+    cleanupExpiredSessions();
+    
+    return sessionId;
+}
+
+function isSessionValid(sessionId) {
+    if (!sessionId || !SESSION_STORE.has(sessionId)) return false;
+    const session = SESSION_STORE.get(sessionId);
+    if (Date.now() > session.expiresAt) {
+        SESSION_STORE.delete(sessionId);
+        return false;
+    }
+    return true;
+}
+
+function cleanupExpiredSessions() {
+    const now = Date.now();
+    for (const [sessionId, session] of SESSION_STORE) {
+        if (now > session.expiresAt) {
+            SESSION_STORE.delete(sessionId);
+        }
+    }
+}
+
+function invalidateSession(sessionId) {
+    SESSION_STORE.delete(sessionId);
+}
+
+// Middleware to check authentication
+function requireAuth(req, res, next) {
+    const sessionCookie = req.cookies[SESSION_COOKIE_NAME];
+    
+    if (!sessionCookie || !isSessionValid(sessionCookie)) {
+        // Redirect to password page for browser requests
+        if (req.accepts(['html'])) {
+            return res.redirect('/');
+        }
+        // Return 401 for API requests
+        return res.status(401).json({ error: 'Unauthorized. Please log in first.' });
+    }
+    
+    // Authenticated
+    req.authenticated = true;
+    req.sessionId = sessionCookie;
+    next();
+}
+
+// Middleware to redirect authenticated users away from login
+function requireNoAuth(req, res, next) {
+    const sessionCookie = req.cookies[SESSION_COOKIE_NAME];
+    
+    if (sessionCookie && isSessionValid(sessionCookie)) {
+        // Already authenticated — redirect to chat
+        return res.redirect('/chat');
+    }
+    
+    // Not authenticated
+    next();
+}
 
 // ============================================================
 // Firebase Admin Initialization
@@ -234,7 +318,7 @@ if (process.env.TAVILY_API_KEY) {
 // Initialize database (with startup diagnostics + fallback)
 initDb().then(() => {
     console.log('[Startup] ✅ Server fully initialized');
-    console.log('[Startup] 🌐 Listening on port ' + (process.env.PORT || 3000));
+    console.log('[Startup] 🌐 Listening on port ' + (process.env.PORT || 3014));
 });
 
 const __filename = fileURLToPath(import.meta.url);
@@ -299,7 +383,7 @@ app.get('/api/health', (req, res) => {
         status: 'ok',
         uptime: process.uptime(),
         timestamp: Date.now(),
-        port: process.env.PORT || 3000,
+        port: process.env.PORT || 3014,
         keysLoaded: API_KEYS ? API_KEYS.length : 0,
         nodeVersion: process.version,
         database: {
@@ -343,7 +427,7 @@ function startServer(app, port, retries = 3) {
     };
     attempt(0);
 }
-const port = process.env.PORT || 3000;
+const port = process.env.PORT || 3014;
 
 // Increase JSON body limit for base64 payloads
 app.use(express.json({ limit: '50mb' }));
@@ -376,24 +460,6 @@ app.use(cookieParser());
 //     revalidates every load but can still serve 304s.
 //   • The (now-removed) service-worker.js path is hard-pinned to
 //     `no-store` as a safety net in case it ever returns to the project.
-app.use(express.static(path.join(__dirname, 'public'), {
-    etag: true,
-    lastModified: true,
-    maxAge: 0,
-    setHeaders: (res, filePath) => {
-        if (filePath.endsWith('.html')) {
-            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-            res.setHeader('Pragma', 'no-cache');
-            res.setHeader('Expires', '0');
-        } else if (/\.(js|css)$/.test(filePath)) {
-            res.setHeader('Cache-Control', 'no-cache, must-revalidate');
-        } else if (/(service-worker|sw)\.js$/i.test(filePath)) {
-            // Safety net: a SW must NEVER be cached.
-            res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
-        }
-    }
-}));
-
 // Add headers to allow popups from external origins (prevents COOP popup blocking when using signInWithPopup)
 app.use((req, res, next) => {
     // Allow cross-origin opener policy that permits popups to close the opener window
@@ -441,8 +507,64 @@ app.set('trust proxy', 1);
 // PAGE ROUTES
 // ============================================================
 
-app.get('/chat', (req, res) => {
+// GET / — Password login page
+app.get('/', requireNoAuth, (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'password.html'));
+});
+
+// GET /chat — Protected chat interface
+app.get('/chat', requireAuth, (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'chat.html'));
+});
+
+// POST /api/auth/login — Authenticate with password
+app.post('/api/auth/login', (req, res) => {
+    const { password } = req.body;
+
+    if (!VOSIL_PASSWORD) {
+        return res.status(503).json({ success: false, error: 'Authentication not configured' });
+    }
+
+    if (!password || typeof password !== 'string') {
+        return res.status(400).json({ success: false, error: 'Password is required' });
+    }
+
+    // Constant-time comparison to prevent timing attacks
+    if (!crypto.timingSafeEqual(
+        Buffer.from(password),
+        Buffer.from(VOSIL_PASSWORD)
+    )) {
+        console.warn('[Auth] ⚠️ Failed authentication attempt (incorrect password)');
+        return res.status(401).json({ success: false, error: 'Incorrect password' });
+    }
+
+    // Password is correct — create session
+    const sessionId = createSession();
+    
+    // Set secure HttpOnly cookie
+    res.cookie(SESSION_COOKIE_NAME, sessionId, {
+        httpOnly: true,
+        secure: process.env.VERCEL || process.env.VERCEL_ENV ? true : false,
+        sameSite: 'lax',
+        maxAge: SESSION_EXPIRY,
+        path: '/'
+    });
+
+    console.log('[Auth] ✅ Successful authentication');
+    res.json({ success: true, message: 'Authentication successful' });
+});
+
+// POST /api/auth/logout — Invalidate session
+app.post('/api/auth/logout', (req, res) => {
+    const sessionCookie = req.cookies[SESSION_COOKIE_NAME];
+    
+    if (sessionCookie) {
+        invalidateSession(sessionCookie);
+    }
+    
+    res.clearCookie(SESSION_COOKIE_NAME, { path: '/' });
+    console.log('[Auth] ✅ User logged out');
+    res.json({ success: true });
 });
 
 // ============================================================
@@ -2094,7 +2216,7 @@ async function buildFileParts(files, client = null) {
 
 // file upload endpoint
 
-app.post('/api/upload', upload.array('files', 10), async (req, res) => {
+app.post('/api/upload', requireAuth, upload.array('files', 10), async (req, res) => {
     try {
         const files = req.files || [];
         if (files.length === 0) return res.status(400).json({ error: 'No files uploaded' });
@@ -2117,7 +2239,7 @@ app.post('/api/upload', upload.array('files', 10), async (req, res) => {
     }
 });
 
-app.post('/api/preprocess-files', upload.array('files', 10), async (req, res) => {
+app.post('/api/preprocess-files', requireAuth, upload.array('files', 10), async (req, res) => {
     const files = req.files || [];
     if (files.length === 0) return res.status(400).json({ error: 'No files uploaded' });
 
@@ -2163,7 +2285,7 @@ app.post('/api/preprocess-files', upload.array('files', 10), async (req, res) =>
 // IMAGE GENERATION ENDPOINT — Cloudflare Workers AI + Supabase Storage
 // ============================================================
 
-app.post('/api/generate-image', async (req, res) => {
+app.post('/api/generate-image', requireAuth, async (req, res) => {
     try {
         const { prompt, sessionId } = req.body;
         if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
@@ -2210,7 +2332,7 @@ app.post('/api/generate-image', async (req, res) => {
 // IMAGE EDITING ENDPOINT — Cloudflare Workers AI + Supabase Storage
 // ============================================================
 
-app.post('/api/edit-image', upload.single('file'), async (req, res) => {
+app.post('/api/edit-image', requireAuth, upload.single('file'), async (req, res) => {
     try {
         const instruction = (req.body.instruction || '').trim();
         const sessionId = req.body.sessionId;
@@ -2290,7 +2412,7 @@ function conversationMemoryMiddleware(req, res, next) {
 
 app.use('/api/chat', conversationMemoryMiddleware);
 
-app.get('/api/context/:sessionId', (req, res, next) => {
+app.get('/api/context/:sessionId', requireAuth, (req, res, next) => {
     try {
         const { sessionId } = req.params;
         res.json({ context: getConversationContext(sessionId, 20) });
@@ -2522,31 +2644,227 @@ async function verifyFirebaseToken(token) {
     }
 }
 
+// ============================================================
+// FLUTTER APP AUTH — JWT ACCESS TOKENS & REFRESH TOKENS
+// ============================================================
+// The Flutter app authenticates through the website (source=app).
+// After a successful login/signup/Google auth, the backend issues:
+//   • a signed JWT access token (verified by verifyAccessToken below)
+//   • an opaque refresh token (hashed before storage)
+// The access token embeds the Firebase uid so every existing
+// middleware (conversations, etc.) keeps working unchanged.
+
+const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
+const ACCESS_TOKEN_TTL = 30 * 24 * 60 * 60;          // 30 days (seconds)
+const REFRESH_TOKEN_TTL = 90 * 24 * 60 * 60 * 1000;  // 90 days (ms)
+
+// sha256(refreshToken) -> { uid, name, email, avatar, expiresAt }
+const refreshTokenMemory = new Map();
+
+function sha256(value) {
+    return crypto.createHash('sha256').update(value).digest('hex');
+}
+
+function signAccessToken(profile) {
+    return jwt.sign(
+        {
+            uid: profile.uid,
+            name: profile.name || '',
+            email: profile.email || '',
+            avatar: profile.avatar || null,
+        },
+        JWT_SECRET,
+        {
+            subject: profile.uid,
+            issuer: 'vosil',
+            audience: 'vosil',
+            algorithm: 'HS256',
+            expiresIn: ACCESS_TOKEN_TTL,
+        }
+    );
+}
+
+function verifyAccessToken(token) {
+    if (!token || typeof token !== 'string') return null;
+    try {
+        return jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'], issuer: 'vosil', audience: 'vosil' });
+    } catch (err) {
+        return null;
+    }
+}
+
+async function persistRefreshToken(rawToken, profile) {
+    const hash = sha256(rawToken);
+    const payload = {
+        uid: profile.uid,
+        name: profile.name || '',
+        email: profile.email || '',
+        avatar: profile.avatar || null,
+        expiresAt: Date.now() + REFRESH_TOKEN_TTL,
+    };
+    if (isDatabaseReady()) {
+        try {
+            await pool.query(
+                `INSERT INTO auth_refresh_tokens (token_hash, user_id, profile, expires_at)
+                 VALUES ($1, $2, $3, $4)
+                 ON CONFLICT (token_hash) DO UPDATE SET
+                   expires_at = EXCLUDED.expires_at,
+                   profile = EXCLUDED.profile`,
+                [hash, payload.uid, payload, new Date(payload.expiresAt).toISOString()]
+            );
+            return;
+        } catch (err) {
+            console.warn('[AppAuth] ⚠️ Refresh token DB persist failed, using memory:', err.message);
+        }
+    }
+    refreshTokenMemory.set(hash, payload);
+}
+
+async function findRefreshToken(rawToken) {
+    if (!rawToken || typeof rawToken !== 'string') return null;
+    const hash = sha256(rawToken);
+    if (isDatabaseReady()) {
+        try {
+            const result = await pool.query(
+                'SELECT profile, expires_at FROM auth_refresh_tokens WHERE token_hash = $1',
+                [hash]
+            );
+            if (result.rows.length > 0) {
+                const row = result.rows[0];
+                const expiresAt = new Date(row.expires_at).getTime();
+                if (Date.now() > expiresAt) {
+                    await deleteRefreshToken(rawToken);
+                    return null;
+                }
+                const p = row.profile || {};
+                return { uid: p.uid, name: p.name || '', email: p.email || '', avatar: p.avatar || null };
+            }
+        } catch (err) {
+            console.warn('[AppAuth] ⚠️ Refresh token DB lookup failed, using memory:', err.message);
+        }
+    }
+    const payload = refreshTokenMemory.get(hash);
+    if (!payload) return null;
+    if (Date.now() > payload.expiresAt) {
+        refreshTokenMemory.delete(hash);
+        return null;
+    }
+    return { uid: payload.uid, name: payload.name, email: payload.email, avatar: payload.avatar };
+}
+
+async function deleteRefreshToken(rawToken) {
+    const hash = sha256(rawToken);
+    refreshTokenMemory.delete(hash);
+    if (isDatabaseReady()) {
+        try {
+            await pool.query('DELETE FROM auth_refresh_tokens WHERE token_hash = $1', [hash]);
+        } catch (err) {
+            console.warn('[AppAuth] ⚠️ Refresh token DB delete failed:', err.message);
+        }
+    }
+}
+
+async function issueRefreshToken(profile) {
+    const rawToken = crypto.randomBytes(48).toString('base64url');
+    await persistRefreshToken(rawToken, profile);
+    return rawToken;
+}
+
+// Best-effort enrichment of a user profile from the Firestore users doc.
+async function getUserProfileFromFirestore(uid) {
+    try {
+        const snap = await getFirestore().collection('users').doc(uid).get();
+        if (snap.exists) {
+            const d = snap.data();
+            return {
+                uid,
+                name: d.name || d.displayName || '',
+                email: d.email || '',
+                avatar: d.photoURL || d.avatar || null,
+            };
+        }
+    } catch (err) {
+        console.warn('[AppAuth] ⚠️ Firestore profile lookup failed (using token claims):', err.message);
+    }
+    return null;
+}
+
+function profileFromDecoded(decoded) {
+    return {
+        uid: decoded.uid,
+        name: decoded.name || decoded.displayName || '',
+        email: decoded.email || '',
+        avatar: decoded.picture || decoded.photoURL || null,
+    };
+}
+
+// Resolve an authenticated user from either a VOSIL JWT or a Firebase ID token.
+async function resolveProfileFromRequest(req) {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
+    const token = authHeader.slice(7);
+
+    const appJwt = verifyAccessToken(token);
+    if (appJwt && appJwt.uid) {
+        return { uid: appJwt.uid, name: appJwt.name || '', email: appJwt.email || '', avatar: appJwt.avatar || null };
+    }
+
+    const decoded = await verifyFirebaseToken(token);
+    if (decoded && decoded.uid) return profileFromDecoded(decoded);
+
+    return null;
+}
+
+// ============================================================
+// FLUTTER APP AUTH API
+// ============================================================
+
+// ============================================================
+// Auth endpoints removed — will be re-implemented with password system in Part 2
+// ============================================================
+
 // Auth middleware for conversation API
 
 async function resolveConversationUser(req, res, next) {
     try {
         const authHeader = req.headers.authorization;
-        const xUserId = req.headers['x-user-id'];
-        
+
         if (authHeader && authHeader.startsWith('Bearer ')) {
             const token = authHeader.slice(7);
+
+            // 1. Try the VOSIL app JWT first (Flutter deep-link auth).
+            const appJwt = verifyAccessToken(token);
+            if (appJwt && appJwt.uid) {
+                req.userId = appJwt.uid;
+                req.firebaseUser = appJwt;
+                req.authType = 'app';
+                console.log(`[Auth] ✅ App JWT user: ${appJwt.uid.substring(0, 12)}...`);
+                return next();
+            }
+
+            // 2. Fall back to a Firebase ID token (website auth).
             const decoded = await verifyFirebaseToken(token);
             if (decoded && decoded.uid) {
                 req.userId = decoded.uid;
                 req.firebaseUser = decoded;
                 console.log(`[Auth] ✅ Authenticated user: ${decoded.uid.substring(0, 12)}...`);
-            } else {
-                console.warn('[Auth] ⚠️ Bearer token present but verification failed — falling back to anonymous');
-                req.userId = xUserId || 'anonymous';
+                return next();
             }
-        } else if (xUserId) {
-            req.userId = xUserId;
+
+            // ⚠️ No verified identity. We deliberately do NOT scope conversations by the
+            // client-supplied X-User-Id header: an unverifiable header would let the same
+            // browser persist chats under different user_ids between page loads (e.g. when a
+            // legacy Firebase session appears or expires), which makes saved chats "disappear"
+            // after a refresh. Cookie-auth (password) users always map to the stable
+            // 'anonymous' bucket instead.
+            console.warn('[Auth] ⚠️ Bearer token present but verification failed — using anonymous identity');
+            req.userId = 'anonymous';
         } else {
+            // No Bearer token — plain password-cookie web session → stable identity.
             req.userId = 'anonymous';
         }
     } catch {
-        req.userId = req.headers['x-user-id'] || 'anonymous';
+        req.userId = 'anonymous';
     }
     next();
 }
@@ -2574,13 +2892,16 @@ async function saveConversationToDb(sessionId, title, userId, messages) {
             [sessionId, title || 'New Chat', userId]
         );
         
-        // Insert messages if provided
+        // Replace the message snapshot for this conversation. A plain INSERT with
+        // "ON CONFLICT DO NOTHING" would APPEND duplicate rows on every re-save
+        // (there is no unique constraint on messages), so first remove the previous
+        // snapshot — this mirrors the file-backed fallback store's semantics and keeps
+        // the stored history identical to the one currently displayed in the UI.
+        await pool.query('DELETE FROM messages WHERE conversation_id = $1', [sessionId]);
         if (messages && messages.length > 0) {
             for (const msg of messages) {
                 await pool.query(
-                    `INSERT INTO messages (conversation_id, role, content) 
-                     VALUES ($1, $2, $3)
-                     ON CONFLICT DO NOTHING`,
+                    `INSERT INTO messages (conversation_id, role, content) VALUES ($1, $2, $3)`,
                     [sessionId, msg.role, msg.content]
                 );
             }
@@ -2590,6 +2911,106 @@ async function saveConversationToDb(sessionId, title, userId, messages) {
         console.error(`[DB] Failed to save conversation ${sessionId}:`, err.message);
         return false;
     }
+}
+
+// ============================================================
+// FILE-BACKED FALLBACK HISTORY STORE
+// Used when the real PostgreSQL database is unavailable
+// (fallback mode). Persists conversations to a JSON file so
+// chat history survives page refreshes AND server restarts
+// without a live database. The real DB path is untouched.
+// ============================================================
+const FALLBACK_HISTORY_DIR = isVercel ? path.join('/tmp') : path.join(__dirname, 'data');
+const FALLBACK_HISTORY_FILE = path.join(FALLBACK_HISTORY_DIR, 'chat-history.json');
+
+function loadFallbackHistory() {
+    try {
+        if (!fs.existsSync(FALLBACK_HISTORY_FILE)) return { conversations: [], messages: [] };
+        const raw = fs.readFileSync(FALLBACK_HISTORY_FILE, 'utf8');
+        const data = JSON.parse(raw);
+        return {
+            conversations: Array.isArray(data.conversations) ? data.conversations : [],
+            messages: Array.isArray(data.messages) ? data.messages : [],
+        };
+    } catch (err) {
+        console.error('[FallbackHistory] Failed to load history file:', err.message);
+        return { conversations: [], messages: [] };
+    }
+}
+
+function persistFallbackHistory(data) {
+    try {
+        if (!fs.existsSync(FALLBACK_HISTORY_DIR)) fs.mkdirSync(FALLBACK_HISTORY_DIR, { recursive: true });
+        fs.writeFileSync(FALLBACK_HISTORY_FILE, JSON.stringify(data, null, 2), 'utf8');
+    } catch (err) {
+        console.error('[FallbackHistory] Failed to write history file:', err.message);
+    }
+}
+
+async function listFallbackConversations(userId) {
+    const data = loadFallbackHistory();
+    return data.conversations
+        .filter(c => c.user_id === userId)
+        .sort((a, b) => new Date(b.updated_at) - new Date(a.updated_at))
+        .map(c => ({ id: c.id, title: c.title, updated_at: c.updated_at }));
+}
+
+async function saveFallbackConversation(id, title, userId, messages) {
+    const data = loadFallbackHistory();
+    const existing = data.conversations.find(c => c.id === id);
+    if (existing) {
+        existing.title = title || existing.title || 'New Chat';
+        existing.user_id = userId;
+        existing.updated_at = new Date().toISOString();
+    } else {
+        data.conversations.push({
+            id,
+            title: title || 'New Chat',
+            user_id: userId,
+            updated_at: new Date().toISOString(),
+        });
+    }
+    if (messages && Array.isArray(messages)) {
+        data.messages = data.messages.filter(m => m.conversation_id !== id);
+        messages.forEach((msg, idx) => {
+            data.messages.push({
+                conversation_id: id,
+                role: msg.role,
+                content: msg.content,
+                created_at: new Date().toISOString(),
+            });
+        });
+    }
+    persistFallbackHistory(data);
+    return true;
+}
+
+async function getFallbackMessages(conversationId) {
+    const data = loadFallbackHistory();
+    return data.messages
+        .filter(m => m.conversation_id === conversationId)
+        .sort((a, b) => new Date(a.created_at) - new Date(b.created_at))
+        .map(m => ({ role: m.role, content: m.content }));
+}
+
+async function renameFallbackConversation(id, title, userId) {
+    const data = loadFallbackHistory();
+    const conv = data.conversations.find(c => c.id === id);
+    if (!conv || conv.user_id !== userId) return false;
+    conv.title = title;
+    conv.updated_at = new Date().toISOString();
+    persistFallbackHistory(data);
+    return true;
+}
+
+async function deleteFallbackConversation(id, userId) {
+    const data = loadFallbackHistory();
+    const conv = data.conversations.find(c => c.id === id);
+    if (!conv || conv.user_id !== userId) return false;
+    data.conversations = data.conversations.filter(c => c.id !== id);
+    data.messages = data.messages.filter(m => m.conversation_id !== id);
+    persistFallbackHistory(data);
+    return true;
 }
 
 // Check if user owns the conversation 
@@ -2610,10 +3031,11 @@ async function checkConversationOwnership(conversationId, userId) {
 
 // GET /api/conversations - Get conversations for the authenticated user
 
-app.get('/api/conversations', resolveConversationUser, async (req, res) => {
+app.get('/api/conversations', requireAuth, resolveConversationUser, async (req, res) => {
     try {
         if (!isDatabaseReady()) {
-            return res.json([]);
+            const rows = await listFallbackConversations(req.userId);
+            return res.json(rows);
         }
         const result = await pool.query(
             'SELECT id, title, updated_at FROM conversations WHERE user_id = $1 ORDER BY updated_at DESC',
@@ -2628,14 +3050,16 @@ app.get('/api/conversations', resolveConversationUser, async (req, res) => {
 
 //  Save a conversation
 
-app.post('/api/conversations', resolveConversationUser, async (req, res) => {
+app.post('/api/conversations', requireAuth, resolveConversationUser, async (req, res) => {
     try {
-        if (!isDatabaseReady()) {
-            return res.status(503).json({ error: 'Database not available' });
-        }
         const { id, title, messages } = req.body;
         if (!id) return res.status(400).json({ error: 'Conversation ID required' });
-        
+
+        if (!isDatabaseReady()) {
+            await saveFallbackConversation(id, title, req.userId, messages);
+            return res.json({ success: true });
+        }
+
         await saveConversationToDb(id, title, req.userId, messages);
         res.json({ success: true });
     } catch (err) {
@@ -2646,10 +3070,16 @@ app.post('/api/conversations', resolveConversationUser, async (req, res) => {
 
 //  Get messages for a conversation
 
-app.get('/api/conversations/:id/messages', resolveConversationUser, async (req, res) => {
+app.get('/api/conversations/:id/messages', requireAuth, resolveConversationUser, async (req, res) => {
     try {
         if (!isDatabaseReady()) {
-            return res.json([]);
+            const convos = await listFallbackConversations(req.userId);
+            if (!convos.some(c => c.id === req.params.id)) return res.json([]);
+            const msgs = await getFallbackMessages(req.params.id);
+            return res.json(msgs.map(m => {
+                const parsed = parseStoredContent(m.content);
+                return { role: m.role, text: parsed.text, id: parsed.id, replyTo: parsed.replyTo };
+            }));
         }
         // Check ownership
         const owned = await checkConversationOwnership(req.params.id, req.userId);
@@ -2676,14 +3106,17 @@ app.get('/api/conversations/:id/messages', resolveConversationUser, async (req, 
 });
 
 // Rename a conversation
-app.put('/api/conversations/:id', resolveConversationUser, async (req, res) => {
+app.put('/api/conversations/:id', requireAuth, resolveConversationUser, async (req, res) => {
     try {
-        if (!isDatabaseReady()) {
-            return res.status(503).json({ error: 'Database not available' });
-        }
         const { title } = req.body;
         if (!title) return res.status(400).json({ error: 'Title required' });
-        
+
+        if (!isDatabaseReady()) {
+            const ok = await renameFallbackConversation(req.params.id, title, req.userId);
+            if (!ok) return res.status(403).json({ error: 'Not authorized' });
+            return res.json({ success: true });
+        }
+
         // Check ownership
         const owned = await checkConversationOwnership(req.params.id, req.userId);
         if (!owned) return res.status(403).json({ error: 'Not authorized' });
@@ -2700,10 +3133,12 @@ app.put('/api/conversations/:id', resolveConversationUser, async (req, res) => {
 });
 
 // Delete a conversation
-app.delete('/api/conversations/:id', resolveConversationUser, async (req, res) => {
+app.delete('/api/conversations/:id', requireAuth, resolveConversationUser, async (req, res) => {
     try {
         if (!isDatabaseReady()) {
-            return res.status(503).json({ error: 'Database not available' });
+            const ok = await deleteFallbackConversation(req.params.id, req.userId);
+            if (!ok) return res.status(403).json({ error: 'Not authorized' });
+            return res.json({ success: true });
         }
         // Check ownership
         const owned = await checkConversationOwnership(req.params.id, req.userId);
@@ -2734,7 +3169,7 @@ function validateSessionId(id) {
     return null;
 }
 
-app.post('/api/chat', upload.array('files', 10), async (req, res) => {
+app.post('/api/chat', requireAuth, upload.array('files', 10), async (req, res) => {
     try {
         let message = (typeof req.body.message === 'string') ? req.body.message : '';
         let sessionId = validateSessionId(req.body.sessionId);
@@ -3153,6 +3588,44 @@ app.use((err, req, res, next) => {
     if (err.message?.startsWith('Unsupported file type')) return res.status(415).json({ error: `⚠️ ${err.message}` });
     next(err);
 });
+
+// ============================================================
+// STATIC FILE SERVING (MUST BE AFTER ALL ROUTES)
+// ============================================================
+// Serve static files with NO aggressive caching.
+//
+// Why no `max-age: 1d`?
+//   The previous configuration set `Cache-Control: public, max-age=86400`
+//   on every JS / CSS / HTML file. Combined with the (now-removed) cache-
+//   first Service Worker, that meant returning users kept running stale
+//   code for up to 24h after a deploy and only Ctrl+F5 would refresh.
+//
+// What we do instead:
+//   • ETag + Last-Modified are kept on (express.static default) so the
+//     browser revalidates cheaply via 304 Not Modified when content is
+//     unchanged.
+//   • HTML files are sent with `no-cache, no-store, must-revalidate` so
+//     the browser ALWAYS asks the server — the entry point must always
+//     be fresh.
+//   • JS / CSS / images use `no-cache, must-revalidate` so the browser
+//     revalidates every load but can still serve 304s.
+app.use(express.static(path.join(__dirname, 'public'), {
+    etag: true,
+    lastModified: true,
+    maxAge: 0,
+    setHeaders: (res, filePath) => {
+        if (filePath.endsWith('.html')) {
+            res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+            res.setHeader('Pragma', 'no-cache');
+            res.setHeader('Expires', '0');
+        } else if (/\.(js|css)$/.test(filePath)) {
+            res.setHeader('Cache-Control', 'no-cache, must-revalidate');
+        } else if (/(service-worker|sw)\.js$/i.test(filePath)) {
+            // Safety net: a SW must NEVER be cached.
+            res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+        }
+    }
+}));
 
 // On Vercel: export the Express app as a serverless function handler
 export default app;

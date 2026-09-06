@@ -1,6 +1,6 @@
-import { useState, type FormEvent } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { signUp, signIn, signInWithGooglePopup, onAuthChange } from '../lib/firebase';
+import { signUp, signIn, signInWithGooglePopup, onAuthChange, isAppSource, completeAppAuth } from '../lib/firebase';
 import { getFriendlyAuthError } from '../lib/authError';
 
 interface AuthModalProps {
@@ -18,16 +18,24 @@ export default function AuthModal({ isOpen, initialMode, onClose }: AuthModalPro
   const [errorAction, setErrorAction] = useState<{ label: string; targetMode: 'login' | 'signup' } | null>(null);
   const [loading, setLoading] = useState(false);
 
+  // Keep the internal mode in sync with the route (e.g. /login vs /signup).
+  useEffect(() => {
+    setMode(initialMode);
+    setError('');
+    setErrorAction(null);
+  }, [initialMode]);
+
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError('');
     setErrorAction(null);
     setLoading(true);
     try {
+      let user;
       if (mode === 'signup') {
-        await signUp(name, email, password);
+        user = await signUp(name, email, password);
       } else {
-        await signIn(email, password);
+        user = await signIn(email, password);
       }
 
       // Wait for Firebase to confirm the auth state to avoid a race
@@ -44,6 +52,13 @@ export default function AuthModal({ isOpen, initialMode, onClose }: AuthModalPro
           resolve();
         }, 2000);
       });
+
+      // Authentication was started from the Flutter app: issue tokens + deep-link back.
+      if (isAppSource() && user) {
+        console.log('AUTHMODAL: source=app — issuing app tokens');
+        const ok = await completeAppAuth(user);
+        if (ok) return;
+      }
 
       console.log('AUTHMODAL: login successful, redirecting to /chat.html');
 
@@ -74,7 +89,7 @@ export default function AuthModal({ isOpen, initialMode, onClose }: AuthModalPro
     setErrorAction(null);
     setLoading(true);
     try {
-      await signInWithGooglePopup();
+      const user = await signInWithGooglePopup();
 
       await new Promise<void>((resolve) => {
         const unsub = onAuthChange((state) => {
@@ -88,6 +103,13 @@ export default function AuthModal({ isOpen, initialMode, onClose }: AuthModalPro
           resolve();
         }, 2000);
       });
+
+      // Authentication was started from the Flutter app: issue tokens + deep-link back.
+      if (isAppSource() && user) {
+        console.log('AUTHMODAL: source=app (Google) — issuing app tokens');
+        const ok = await completeAppAuth(user);
+        if (ok) return;
+      }
 
       console.log('AUTHMODAL: Google login successful, redirecting to /chat.html');
 
@@ -142,7 +164,7 @@ export default function AuthModal({ isOpen, initialMode, onClose }: AuthModalPro
 
             <div className="flex items-center justify-center gap-2 mb-6">
               <div className="w-8 h-8 rounded-full border-2 border-primary" />
-              <img src="/icons/ai-avatar.svg" alt="VOSIL" style="height:28px;width:auto" />
+              <img src="/icons/ai-avatar.svg" alt="VOSIL" style={{height:"28px", width:"auto"}} />
             </div>
 
             <h2 className="text-center text-xl font-semibold mb-6">

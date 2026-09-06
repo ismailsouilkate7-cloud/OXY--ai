@@ -10,10 +10,10 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
-      '/chat': 'http://localhost:3012',
-      '/api': 'http://localhost:3012',
-      '/auth.js': 'http://localhost:3012',
-      '/firebase-config.js': 'http://localhost:3012',
+      '/chat': 'http://localhost:3014',
+      '/api': 'http://localhost:3014',
+      '/auth.js': 'http://localhost:3014',
+      '/firebase-config.js': 'http://localhost:3014',
     },
   },
 });

@@ -193,6 +193,26 @@ async function tryConnectAndInit(parsed) {
             );
         `);
 
+        // Store refresh tokens for the Flutter deep-link auth flow.
+        // token_hash is a SHA-256 of the raw refresh token (we never store raw tokens).
+        await client.query(`
+            CREATE TABLE IF NOT EXISTS auth_refresh_tokens (
+                token_hash VARCHAR(64) PRIMARY KEY,
+                user_id VARCHAR(255) NOT NULL,
+                profile JSONB,
+                expires_at TIMESTAMP WITH TIME ZONE NOT NULL,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+            );
+        `);
+
+        try {
+            await client.query(`
+                CREATE INDEX IF NOT EXISTS idx_auth_refresh_tokens_user_id ON auth_refresh_tokens(user_id);
+            `);
+        } catch (e) {
+            // Ignore
+        }
+
         client.release();
         console.log('[DB CHECK] ✅ Database schema initialized successfully');
         dbDiagnostics.status = 'connected';

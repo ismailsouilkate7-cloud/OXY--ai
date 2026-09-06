@@ -33,14 +33,23 @@ async function apiFetch(url, options = {}) {
 let userLocation = (typeof vosilPersistence !== 'undefined' ? vosilPersistence.getItem('vosil_user_location') : localStorage.getItem('vosil_user_location')) || null;
 
 async function fetchUserLocation() {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 6000);
     try {
-        const response = await fetch('/api/location');
+        const response = await fetch('/api/location', { signal: controller.signal });
+        if (!response.ok) return null;
         const data = await response.json();
         const location = `${data.city || ''}, ${data.region || ''} ${data.country_name || ''}`.replace(/,\s*$/, '').trim();
         return location || null;
     } catch (err) {
-        console.warn('Could not fetch location:', err);
+        if (err && err.name === 'AbortError') {
+            console.warn('[Location] Lookup timed out after 6s — continuing without location.');
+        } else {
+            console.warn('Could not fetch location:', err);
+        }
         return null;
+    } finally {
+        clearTimeout(timeout);
     }
 }
 
@@ -208,38 +217,59 @@ function showChatListEmpty() {
     chatList.innerHTML = '<div class="chat-list-empty"><i class="fa-solid fa-comment-slash"></i><span>No chats yet</span></div>';
 }
 
-async function saveSessionToDb() {
-    if (!currentSessionId) return;
+async function saveSessionToDb(payload) {
+    if (!payload || !payload.id) return;
     try {
-        // Build messages from currentChatHistory for DB storage
-        const messages = currentChatHistory.map(msg => {
-            const needsEncoding = msg.replyTo || msg.id;
-            return {
-                role: msg.sender === 'user' ? 'user' : 'model',
-                content: needsEncoding
-                    ? JSON.stringify({ t: msg.text || '', i: msg.id, r: msg.replyTo || null })
-                    : (msg.text || '')
-            };
-        });
-        
-        // Only save if we have messages
-        if (messages.length === 0) return;
-        
-        const firstUserMsg = messages.find(m => m.role === 'user');
-        let titleText = firstUserMsg ? firstUserMsg.content : '';
-        const parsed = parseStoredContent(titleText);
-        titleText = parsed.text || titleText;
-        const title = titleText.replace(/[\n\r]+/g, ' ').trim().substring(0, 80) || 'New Chat';
-        
         const res = await apiFetch('/api/conversations', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id: currentSessionId, title, messages })
+            body: JSON.stringify(payload)
         });
         if (!res.ok) console.warn('[Save] Failed to save conversation');
     } catch (err) {
         console.warn('[Save] Error saving conversation:', err.message);
     }
+}
+
+// Serialize saves so history snapshots reach the server in the exact order they
+// were taken — otherwise two overlapping fire-and-forget POSTs could complete
+// out of order and a stale snapshot would overwrite a newer one.
+let saveChain = Promise.resolve();
+
+function saveSession() {
+    if (!currentSessionId) return;
+    // 1) Capture a point-in-time snapshot NOW. Doing this inside the async chain
+    // would be dangerous: by the time an earlier queued save runs, currentChatHistory
+    // may have been mutated, so a stale write could clobber a fresh one.
+    const messages = currentChatHistory.map(msg => {
+        const needsEncoding = msg.replyTo || msg.id;
+        return {
+            role: msg.sender === 'user' ? 'user' : 'model',
+            content: needsEncoding
+                ? JSON.stringify({ t: msg.text || '', i: msg.id, r: msg.replyTo || null })
+                : (msg.text || '')
+        };
+    });
+    // Only save if we have messages
+    if (messages.length === 0) return;
+
+    const firstUserMsg = messages.find(m => m.role === 'user');
+    let titleText = firstUserMsg ? firstUserMsg.content : '';
+    const parsed = parseStoredContent(titleText);
+    titleText = parsed.text || titleText;
+    const title = titleText.replace(/[\n\r]+/g, ' ').trim().substring(0, 80) || 'New Chat';
+
+    // 2) The first message of a brand-new chat must be persisted immediately so the
+    // conversation exists even if the AI reply is slow or fails (sidebar shows it now,
+    // and a page refresh keeps it).
+    const payload = { id: currentSessionId, title, messages };
+
+    // 3) Chain the write, then refresh the sidebar so the freshly saved conversation
+    // is visible (avoids GET/POST race). A failure in one save must not block later ones.
+    saveChain = saveChain
+        .then(() => saveSessionToDb(payload))
+        .then(loadSessionsList)
+        .catch(() => {});
 }
 
 async function loadSessionsList() {
@@ -331,12 +361,6 @@ async function loadSession(id) {
         }
         if (window.innerWidth <= 1024) closeSidebar();
     } catch (err) { console.error('Failed to load session', err); }
-}
-
-function saveSession() { 
-    // Save to DB in background (non-blocking)
-    saveSessionToDb();
-    loadSessionsList(); 
 }
 
 function createNewSession() {
@@ -1046,6 +1070,7 @@ function handleSend() {
     currentChatHistory.push({ id: generateMessageId(), text: text, sender: 'user', files: filesForHistory, replyTo: replyTarget?.id || null });
     cancelReply();
     renderHistory();
+    saveSession();
     if (pendingFiles.length > 0) preprocessAndSend(text, pendingFiles, replyInfo);
     else { sendMessage(text, [], false, null, replyInfo); clearPendingFiles(); }
 }
