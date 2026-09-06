@@ -24,10 +24,24 @@ dotenv.config();
 // ============================================================
 // VOSIL PASSWORD AUTHENTICATION SYSTEM
 // ============================================================
-// VOSIL_PASSWORD is trimmed so a trailing newline/whitespace accidentally pasted
-// into the env var (a very common Vercel dashboard footgun) can't silently break
-// password matching.
-const VOSIL_PASSWORD = (process.env.VOSIL_PASSWORD || '').trim();
+// VOSIL_PASSWORD is normalized before comparison. A trailing newline/whitespace
+// accidentally pasted into the env var, a UTF-8 BOM, or surrounding quotes (e.g.
+// copying the quoted "VOSIL_PASSWORD=..." line from .env into the Vercel
+// dashboard value field) are all very common footguns that would silently break
+// password matching. dotenv itself strips surrounding quotes from .env files, so
+// this helper makes a Vercel-stored value behave the exact same way.
+function extractSecret(value) {
+    if (!value) return '';
+    let v = String(value);
+    if (v.charCodeAt(0) === 0xFEFF) v = v.slice(1); // strip UTF-8 BOM
+    if (v.length >= 2 && v[0] === v[v.length - 1] && (v[0] === '"' || v[0] === "'")) {
+        v = v.slice(1, -1);
+    }
+    return v.trim();
+}
+
+const VOSIL_PASSWORD_RAW = process.env.VOSIL_PASSWORD || '';
+const VOSIL_PASSWORD = extractSecret(VOSIL_PASSWORD_RAW);
 const SESSION_COOKIE_NAME = 'vosil_session';
 const SESSION_EXPIRY = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
 const SESSION_STORE = new Map(); // In-memory session store (local dev + legacy tokens)
@@ -41,7 +55,10 @@ const SESSION_SECRET = process.env.JWT_SECRET || process.env.SESSION_SECRET || c
 if (!VOSIL_PASSWORD) {
     console.error('[Auth] ❌ VOSIL_PASSWORD not set in .env — authentication will be disabled!');
 } else {
-    console.log('[Auth] ✅ VOSIL password authentication enabled');
+    // sha256 digest is logged (not the secret) so you can compare Vercel vs local.
+    console.log('[Auth] ✅ VOSIL password authentication enabled (sha256=' +
+        crypto.createHash('sha256').update(VOSIL_PASSWORD, 'utf8').digest('hex') +
+        ', ' + VOSIL_PASSWORD.length + ' chars)');
 }
 
 // Session management helpers
@@ -101,6 +118,29 @@ function invalidateSession(sessionId) {
     // Note: stateless signed tokens can't be force-expired server-side without a
     // blacklist. The logout route clears the cookie, which is the effective
     // revocation for this app.
+}
+
+// Log-only diagnostic for failed logins — never logs secret material. It reports
+// the cause when a stored VOSIL_PASSWORD value only differs by a common paste
+// artifact, so you can fix the Vercel env var without guessing.
+function diagnosePasswordMismatch(typed, storedRaw) {
+    const dig = (s) => crypto.createHash('sha256').update(s, 'utf8').digest('hex');
+    const typedDigest = dig(typed);
+    const variants = {
+        'leading/trailing whitespace': storedRaw.trim(),
+        'surrounding quotes': storedRaw.trim().replace(/^(['"])(.*)\1$/, '$2'),
+        'spaces/tabs/newlines between chars': storedRaw.replace(/\s+/g, ''),
+        'a BOM or CR/LF characters': storedRaw.replace(/^\uFEFF/, '').replace(/[\r\n]/g, '')
+    };
+    const cause = Object.entries(variants)
+        .filter(([, v]) => v && dig(v) === typedDigest)
+        .map(([label]) => label);
+
+    if (cause.length) {
+        console.warn(`[Auth] ⚠️ Incorrect password — causing factor: ${cause[0]} in the Vercel Production VOSIL_PASSWORD env var. Set it to the exact password and redeploy.`);
+    } else {
+        console.warn(`[Auth] ⚠️ Incorrect password (typed ${typed.length} chars vs configured ${storedRaw.length} raw chars) — Vercel Production VOSIL_PASSWORD does not match what is typed, even after whitespace/quote normalization. Compare its startup sha256 with your local .env value.`);
+    }
 }
 
 // Middleware to check authentication
@@ -572,6 +612,7 @@ app.post('/api/auth/login', (req, res) => {
         const submitted = crypto.createHash('sha256').update(password, 'utf8').digest();
         const expected = crypto.createHash('sha256').update(VOSIL_PASSWORD, 'utf8').digest();
         if (!crypto.timingSafeEqual(submitted, expected)) {
+            diagnosePasswordMismatch(password, VOSIL_PASSWORD_RAW);
             console.warn('[Auth] ⚠️ Failed authentication attempt (incorrect password)');
             return res.status(401).json({ success: false, error: 'Incorrect password' });
         }
