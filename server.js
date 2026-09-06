@@ -24,10 +24,19 @@ dotenv.config();
 // ============================================================
 // VOSIL PASSWORD AUTHENTICATION SYSTEM
 // ============================================================
-const VOSIL_PASSWORD = process.env.VOSIL_PASSWORD;
+// VOSIL_PASSWORD is trimmed so a trailing newline/whitespace accidentally pasted
+// into the env var (a very common Vercel dashboard footgun) can't silently break
+// password matching.
+const VOSIL_PASSWORD = (process.env.VOSIL_PASSWORD || '').trim();
 const SESSION_COOKIE_NAME = 'vosil_session';
 const SESSION_EXPIRY = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
-const SESSION_STORE = new Map(); // In-memory session store (consider persistent store for production)
+const SESSION_STORE = new Map(); // In-memory session store (local dev + legacy tokens)
+
+// Secret used to SIGN session cookies. Serverless functions are ephemeral and MANY
+// instances can serve the same user, so session validation must not depend on
+// per-instance memory. On Vercel you MUST set JWT_SECRET (same value as your local
+// .env) so every instance signs/verifies sessions with the same key.
+const SESSION_SECRET = process.env.JWT_SECRET || process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 
 if (!VOSIL_PASSWORD) {
     console.error('[Auth] ❌ VOSIL_PASSWORD not set in .env — authentication will be disabled!');
@@ -36,26 +45,46 @@ if (!VOSIL_PASSWORD) {
 }
 
 // Session management helpers
+// createSession returns a SIGNED token (JWT) so authentication is STATELESS and
+// survives Vercel's ephemeral / multi-instance serverless model. The in-memory
+// SESSION_STORE entry is kept for local single-process runs and legacy tokens.
 function createSession() {
     const sessionId = crypto.randomBytes(32).toString('hex');
     const createdAt = Date.now();
     const expiresAt = createdAt + SESSION_EXPIRY;
     SESSION_STORE.set(sessionId, { createdAt, expiresAt });
-    
+
     // Cleanup expired sessions
     cleanupExpiredSessions();
-    
-    return sessionId;
+
+    return jwt.sign(
+        { ses: sessionId },
+        SESSION_SECRET,
+        { expiresIn: Math.floor(SESSION_EXPIRY / 1000), issuer: 'vosil', audience: 'vosil' }
+    );
 }
 
-function isSessionValid(sessionId) {
-    if (!sessionId || !SESSION_STORE.has(sessionId)) return false;
-    const session = SESSION_STORE.get(sessionId);
-    if (Date.now() > session.expiresAt) {
-        SESSION_STORE.delete(sessionId);
+function isSessionValid(token) {
+    if (!token || typeof token !== 'string') return false;
+
+    // Legacy plain-hex session IDs (created before stateless tokens were introduced).
+    if (!token.includes('.')) {
+        if (!SESSION_STORE.has(token)) return false;
+        const session = SESSION_STORE.get(token);
+        if (Date.now() > session.expiresAt) {
+            SESSION_STORE.delete(token);
+            return false;
+        }
+        return true;
+    }
+
+    // Stateless signed token — verifiable on EVERY serverless instance/region.
+    try {
+        const decoded = jwt.verify(token, SESSION_SECRET, { algorithms: ['HS256'], issuer: 'vosil', audience: 'vosil' });
+        return !!decoded && typeof decoded.ses === 'string';
+    } catch {
         return false;
     }
-    return true;
 }
 
 function cleanupExpiredSessions() {
@@ -69,6 +98,9 @@ function cleanupExpiredSessions() {
 
 function invalidateSession(sessionId) {
     SESSION_STORE.delete(sessionId);
+    // Note: stateless signed tokens can't be force-expired server-side without a
+    // blacklist. The logout route clears the cookie, which is the effective
+    // revocation for this app.
 }
 
 // Middleware to check authentication
@@ -519,39 +551,49 @@ app.get('/chat', requireAuth, (req, res) => {
 
 // POST /api/auth/login — Authenticate with password
 app.post('/api/auth/login', (req, res) => {
-    const { password } = req.body;
+    try {
+        const password = (req.body && typeof req.body.password === 'string')
+            ? req.body.password
+            : '';
 
-    if (!VOSIL_PASSWORD) {
-        return res.status(503).json({ success: false, error: 'Authentication not configured' });
+        if (!VOSIL_PASSWORD) {
+            return res.status(503).json({ success: false, error: 'Authentication not configured' });
+        }
+
+        if (!password) {
+            return res.status(400).json({ success: false, error: 'Password is required' });
+        }
+
+        // Length-safe constant-time comparison. We compare SHA-256 DIGESTS instead
+        // of raw buffers because crypto.timingSafeEqual THROWS a RangeError when
+        // the inputs differ in length. That uncaught crash previously returned an
+        // HTML 500 error page, which the login page misread as
+        // "Connection error. Please try again." — even for a simple typo.
+        const submitted = crypto.createHash('sha256').update(password, 'utf8').digest();
+        const expected = crypto.createHash('sha256').update(VOSIL_PASSWORD, 'utf8').digest();
+        if (!crypto.timingSafeEqual(submitted, expected)) {
+            console.warn('[Auth] ⚠️ Failed authentication attempt (incorrect password)');
+            return res.status(401).json({ success: false, error: 'Incorrect password' });
+        }
+
+        // Password is correct — create a stateless signed session token
+        const sessionId = createSession();
+
+        // Set secure HttpOnly cookie
+        res.cookie(SESSION_COOKIE_NAME, sessionId, {
+            httpOnly: true,
+            secure: process.env.VERCEL || process.env.VERCEL_ENV ? true : false,
+            sameSite: 'lax',
+            maxAge: SESSION_EXPIRY,
+            path: '/'
+        });
+
+        console.log('[Auth] ✅ Successful authentication');
+        res.json({ success: true, message: 'Authentication successful' });
+    } catch (err) {
+        console.error('[Auth] ❌ Login error:', err.message);
+        res.status(500).json({ success: false, error: 'Login failed. Please try again.' });
     }
-
-    if (!password || typeof password !== 'string') {
-        return res.status(400).json({ success: false, error: 'Password is required' });
-    }
-
-    // Constant-time comparison to prevent timing attacks
-    if (!crypto.timingSafeEqual(
-        Buffer.from(password),
-        Buffer.from(VOSIL_PASSWORD)
-    )) {
-        console.warn('[Auth] ⚠️ Failed authentication attempt (incorrect password)');
-        return res.status(401).json({ success: false, error: 'Incorrect password' });
-    }
-
-    // Password is correct — create session
-    const sessionId = createSession();
-    
-    // Set secure HttpOnly cookie
-    res.cookie(SESSION_COOKIE_NAME, sessionId, {
-        httpOnly: true,
-        secure: process.env.VERCEL || process.env.VERCEL_ENV ? true : false,
-        sameSite: 'lax',
-        maxAge: SESSION_EXPIRY,
-        path: '/'
-    });
-
-    console.log('[Auth] ✅ Successful authentication');
-    res.json({ success: true, message: 'Authentication successful' });
 });
 
 // POST /api/auth/logout — Invalidate session
@@ -571,7 +613,6 @@ app.post('/api/auth/logout', (req, res) => {
 // ADMIN AUTHENTICATION SYSTEM
 // ============================================================
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
-const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
 
 // Store active admin sessions (token -> { authenticated: true, createdAt })
 const adminSessions = new Map();
@@ -3586,6 +3627,28 @@ app.use((err, req, res, next) => {
         return res.status(400).json({ error: `Upload error: ${err.message}` });
     }
     if (err.message?.startsWith('Unsupported file type')) return res.status(415).json({ error: `⚠️ ${err.message}` });
+    next(err);
+});
+
+// ============================================================
+// API ERROR HANDLING — always JSON, never an HTML error page
+// ============================================================
+// The password/chat clients parse every response as JSON. If an unhandled error
+// fell through to Express's default HTML error page (or a Vercel proxy page), the
+// client's response.json() would throw and the UI would show a misleading
+// "Connection error. Please try again." even though the server DID respond.
+
+// 1) Unmatched /api/* routes → JSON 404 (not the static/HTML 404 page).
+app.use('/api', (req, res) => {
+    res.status(404).json({ error: 'Not found' });
+});
+
+// 2) Any unhandled error on an /api/* route → JSON error body.
+app.use((err, req, res, next) => {
+    if (res.headersSent) return next(err);
+    if (req.path.startsWith('/api/')) {
+        return res.status(err.status || 500).json({ error: err.message || 'Internal server error' });
+    }
     next(err);
 });
 
