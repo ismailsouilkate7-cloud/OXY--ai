@@ -52,10 +52,11 @@ const serverStartInGuard = s.includes('startServer(app, port);') && s.substring(
 check('startServer() only runs in Vercel guard', serverStartInGuard);
 
 // === Requirement 6: vercel.json is compatible with Express serverless ===
-check('vercel.json has server.js as function', v.functions && v.functions['server.js'] !== undefined);
-check('vercel.json has 1000MB+ memory', v.functions['server.js'].memory >= 1024);
-check('vercel.json has 30s+ maxDuration', v.functions['server.js'].maxDuration >= 30);
-check('vercel.json rewrites all to server.js', v.rewrites && v.rewrites[0].destination === '/server.js');
+check('vercel.json has api/index.js as function', v.functions && v.functions['api/index.js'] !== undefined);
+check('vercel.json has 1000MB+ memory', v.functions['api/index.js'].memory >= 1024);
+check('vercel.json has 30s+ maxDuration', v.functions['api/index.js'].maxDuration >= 30);
+check('vercel.json rewrites API routes to /api function', v.rewrites && v.rewrites[0].destination === '/api');
+check('vercel.json no longer rewrites to /server.js', !JSON.stringify(v.rewrites).includes('/server.js'));
 
 // === Additional safety checks ===
 check('No pdf-parse import', !s.includes('from "pdf-parse"') && !s.includes("from 'pdf-parse'"), 'server.js');
