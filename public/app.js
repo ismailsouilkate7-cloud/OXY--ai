@@ -16,17 +16,9 @@ const chatList = document.getElementById('chat-list');
 const clearChatBtn = document.getElementById('clear-chat-btn');
 const shareBtn = document.getElementById('share-btn');
 
-// === AUTHENTICATED FETCH HELPER ===
+// === FETCH HELPER ===
 async function apiFetch(url, options = {}) {
-    const headers = { ...options.headers };
-    if (window.currentUser && typeof window.currentUser.getIdToken === 'function') {
-        try {
-            const token = await window.currentUser.getIdToken();
-            headers['Authorization'] = `Bearer ${token}`;
-            headers['X-User-Id'] = window.currentUser.uid;
-        } catch { /* token fetch failed — proceed without auth */ }
-    }
-    return fetch(url, { ...options, headers });
+    return fetch(url, { ...options });
 }
 
 // === LOCATION SERVICE ===
@@ -1572,7 +1564,7 @@ function initApp() {
     }
 }
 
-// Expose to window so the auth callback (in chat.html) can re-fetch after auth resolves
+// Expose to window so inline scripts can trigger a reload/re-greeting
 window.loadSessionsList = loadSessionsList;
 window.updateWelcomeGreeting = updateWelcomeGreeting;
 

@@ -1,13 +1,10 @@
 // Bump cache version whenever you deploy new code so the SW refreshes all caches
-const CACHE_NAME = 'oxy-ai-cache-v4';
+const CACHE_NAME = 'oxy-ai-cache-v5';
 const ASSETS_TO_CACHE = [
     '/',
-    '/index.html',
     '/chat.html',
     '/app.js',
     '/style.css',
-    '/auth.js',
-    '/firebase-config.js',
     '/pdf-viewer.js',
     '/widget-renderer.js',
     '/persistence.js',
@@ -60,8 +57,8 @@ self.addEventListener('fetch', (event) => {
     if (event.request.method !== 'GET') return;
 
     const url = new URL(event.request.url);
-    // Ignore API and Admin requests completely
-    if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/admin/')) return;
+    // Ignore API requests completely
+    if (url.pathname.startsWith('/api/')) return;
     // Ignore browser extensions and other non-http schemes
     if (!url.protocol.startsWith('http')) return;
 

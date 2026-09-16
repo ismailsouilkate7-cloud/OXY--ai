@@ -1,16 +1,12 @@
 import { motion } from 'framer-motion';
 
-interface HeaderProps {
-  onOpenAuth: (mode: 'login' | 'signup') => void;
-}
-
 const navLinks = [
   { label: 'About', href: '#about' },
   { label: 'Features', href: '#features' },
   { label: 'Demo', href: '#demo' },
 ];
 
-export default function Header({ onOpenAuth }: HeaderProps) {
+export default function Header() {
   return (
     <motion.header
       initial={{ y: -20, opacity: 0 }}
@@ -40,20 +36,12 @@ export default function Header({ onOpenAuth }: HeaderProps) {
             ))}
           </nav>
 
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => onOpenAuth('login')}
-              className="hidden sm:inline-flex px-4 py-2 text-sm font-medium text-text-secondary hover:text-text-primary transition-colors duration-200"
-            >
-              Log in
-            </button>
-            <button
-              onClick={() => onOpenAuth('signup')}
-              className="px-4 py-2 text-sm font-semibold text-white bg-primary rounded-xl hover:bg-primary-hover transition-all duration-200 hover:shadow-lg hover:shadow-primary/20 active:scale-[0.97]"
-            >
-              Sign up
-            </button>
-          </div>
+          <a
+            href="/chat"
+            className="px-4 py-2 text-sm font-semibold text-white bg-primary rounded-xl hover:bg-primary-hover transition-all duration-200 hover:shadow-lg hover:shadow-primary/20 active:scale-[0.97]"
+          >
+            Start Chatting
+          </a>
         </div>
       </div>
     </motion.header>

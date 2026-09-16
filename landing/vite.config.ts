@@ -12,8 +12,6 @@ export default defineConfig({
     proxy: {
       '/chat': 'http://localhost:3014',
       '/api': 'http://localhost:3014',
-      '/auth.js': 'http://localhost:3014',
-      '/firebase-config.js': 'http://localhost:3014',
     },
   },
 });

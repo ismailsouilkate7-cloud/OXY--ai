@@ -8,209 +8,12 @@ import JSZip from 'jszip';
 import mime from 'mime-types';
 import { v4 as uuidv4 } from 'uuid';
 import compression from 'compression';
-import cookieParser from 'cookie-parser';
 import fs from 'fs';
 
-import crypto from 'crypto';
-import jwt from 'jsonwebtoken';
-import { initializeApp, getApps, cert } from 'firebase-admin/app';
-import { getAuth } from 'firebase-admin/auth';
-import { getFirestore } from 'firebase-admin/firestore';
 import { createClient } from '@supabase/supabase-js';
 import pool, { initDb, isDatabaseReady, getDbDiagnostics } from './db.js';
 
 dotenv.config();
-
-// ============================================================
-// VOSIL PASSWORD AUTHENTICATION SYSTEM
-// ============================================================
-// VOSIL_PASSWORD is normalized before comparison. A trailing newline/whitespace
-// accidentally pasted into the env var, a UTF-8 BOM, or surrounding quotes (e.g.
-// copying the quoted "VOSIL_PASSWORD=..." line from .env into the Vercel
-// dashboard value field) are all very common footguns that would silently break
-// password matching. dotenv itself strips surrounding quotes from .env files, so
-// this helper makes a Vercel-stored value behave the exact same way.
-function extractSecret(value) {
-    if (!value) return '';
-    let v = String(value);
-    if (v.charCodeAt(0) === 0xFEFF) v = v.slice(1); // strip UTF-8 BOM
-    if (v.length >= 2 && v[0] === v[v.length - 1] && (v[0] === '"' || v[0] === "'")) {
-        v = v.slice(1, -1);
-    }
-    return v.trim();
-}
-
-const VOSIL_PASSWORD_RAW = process.env.VOSIL_PASSWORD || '';
-const VOSIL_PASSWORD = extractSecret(VOSIL_PASSWORD_RAW);
-const SESSION_COOKIE_NAME = 'vosil_session';
-const SESSION_EXPIRY = 7 * 24 * 60 * 60 * 1000; // 7 days in milliseconds
-const SESSION_STORE = new Map(); // In-memory session store (local dev + legacy tokens)
-
-// Secret used to SIGN session cookies. Serverless functions are ephemeral and MANY
-// instances can serve the same user, so session validation must not depend on
-// per-instance memory. On Vercel you MUST set JWT_SECRET (same value as your local
-// .env) so every instance signs/verifies sessions with the same key.
-const SESSION_SECRET = process.env.JWT_SECRET || process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
-
-if (!VOSIL_PASSWORD) {
-    console.error('[Auth] ❌ VOSIL_PASSWORD not set in .env — authentication will be disabled!');
-} else {
-    // sha256 digest is logged (not the secret) so you can compare Vercel vs local.
-    console.log('[Auth] ✅ VOSIL password authentication enabled (sha256=' +
-        crypto.createHash('sha256').update(VOSIL_PASSWORD, 'utf8').digest('hex') +
-        ', ' + VOSIL_PASSWORD.length + ' chars)');
-}
-
-// Session management helpers
-// createSession returns a SIGNED token (JWT) so authentication is STATELESS and
-// survives Vercel's ephemeral / multi-instance serverless model. The in-memory
-// SESSION_STORE entry is kept for local single-process runs and legacy tokens.
-function createSession() {
-    const sessionId = crypto.randomBytes(32).toString('hex');
-    const createdAt = Date.now();
-    const expiresAt = createdAt + SESSION_EXPIRY;
-    SESSION_STORE.set(sessionId, { createdAt, expiresAt });
-
-    // Cleanup expired sessions
-    cleanupExpiredSessions();
-
-    return jwt.sign(
-        { ses: sessionId },
-        SESSION_SECRET,
-        { expiresIn: Math.floor(SESSION_EXPIRY / 1000), issuer: 'vosil', audience: 'vosil' }
-    );
-}
-
-function isSessionValid(token) {
-    if (!token || typeof token !== 'string') return false;
-
-    // Legacy plain-hex session IDs (created before stateless tokens were introduced).
-    if (!token.includes('.')) {
-        if (!SESSION_STORE.has(token)) return false;
-        const session = SESSION_STORE.get(token);
-        if (Date.now() > session.expiresAt) {
-            SESSION_STORE.delete(token);
-            return false;
-        }
-        return true;
-    }
-
-    // Stateless signed token — verifiable on EVERY serverless instance/region.
-    try {
-        const decoded = jwt.verify(token, SESSION_SECRET, { algorithms: ['HS256'], issuer: 'vosil', audience: 'vosil' });
-        return !!decoded && typeof decoded.ses === 'string';
-    } catch {
-        return false;
-    }
-}
-
-function cleanupExpiredSessions() {
-    const now = Date.now();
-    for (const [sessionId, session] of SESSION_STORE) {
-        if (now > session.expiresAt) {
-            SESSION_STORE.delete(sessionId);
-        }
-    }
-}
-
-function invalidateSession(sessionId) {
-    SESSION_STORE.delete(sessionId);
-    // Note: stateless signed tokens can't be force-expired server-side without a
-    // blacklist. The logout route clears the cookie, which is the effective
-    // revocation for this app.
-}
-
-// Log-only diagnostic for failed logins — never logs secret material. It reports
-// the cause when a stored VOSIL_PASSWORD value only differs by a common paste
-// artifact, so you can fix the Vercel env var without guessing.
-function diagnosePasswordMismatch(typed, storedRaw) {
-    const dig = (s) => crypto.createHash('sha256').update(s, 'utf8').digest('hex');
-    const typedDigest = dig(typed);
-    const variants = {
-        'leading/trailing whitespace': storedRaw.trim(),
-        'surrounding quotes': storedRaw.trim().replace(/^(['"])(.*)\1$/, '$2'),
-        'spaces/tabs/newlines between chars': storedRaw.replace(/\s+/g, ''),
-        'a BOM or CR/LF characters': storedRaw.replace(/^\uFEFF/, '').replace(/[\r\n]/g, '')
-    };
-    const cause = Object.entries(variants)
-        .filter(([, v]) => v && dig(v) === typedDigest)
-        .map(([label]) => label);
-
-    if (cause.length) {
-        console.warn(`[Auth] ⚠️ Incorrect password — causing factor: ${cause[0]} in the Vercel Production VOSIL_PASSWORD env var. Set it to the exact password and redeploy.`);
-    } else {
-        console.warn(`[Auth] ⚠️ Incorrect password (typed ${typed.length} chars vs configured ${storedRaw.length} raw chars) — Vercel Production VOSIL_PASSWORD does not match what is typed, even after whitespace/quote normalization. Compare its startup sha256 with your local .env value.`);
-    }
-}
-
-// Middleware to check authentication
-function requireAuth(req, res, next) {
-    const sessionCookie = req.cookies[SESSION_COOKIE_NAME];
-    
-    if (!sessionCookie || !isSessionValid(sessionCookie)) {
-        // Redirect to password page for browser requests
-        if (req.accepts(['html'])) {
-            return res.redirect('/');
-        }
-        // Return 401 for API requests
-        return res.status(401).json({ error: 'Unauthorized. Please log in first.' });
-    }
-    
-    // Authenticated
-    req.authenticated = true;
-    req.sessionId = sessionCookie;
-    next();
-}
-
-// Middleware to redirect authenticated users away from login
-function requireNoAuth(req, res, next) {
-    const sessionCookie = req.cookies[SESSION_COOKIE_NAME];
-    
-    if (sessionCookie && isSessionValid(sessionCookie)) {
-        // Already authenticated — redirect to chat
-        return res.redirect('/chat');
-    }
-    
-    // Not authenticated
-    next();
-}
-
-// ============================================================
-// Firebase Admin Initialization
-// ============================================================
-// Locally, we can rely on Application Default Credentials (GOOGLE_APPLICATION_CREDENTIALS).
-// On Vercel (no ADC), we need explicit service account credentials via env vars.
-//
-// Required env vars for Vercel (get from Firebase Console > Project Settings > Service Accounts):
-//   FIREBASE_CLIENT_EMAIL — the service account's client_email
-//   FIREBASE_PRIVATE_KEY — the service account's private_key (with real \n, not literal)
-//
-// Optional:
-//   FIREBASE_PROJECT_ID — defaults to 'vosil-ai'
-try {
-    if (getApps().length === 0) {
-        const firebaseClientEmail = process.env.FIREBASE_CLIENT_EMAIL;
-        const firebasePrivateKey = process.env.FIREBASE_PRIVATE_KEY;
-        const firebaseProjectId = process.env.FIREBASE_PROJECT_ID || 'vosil-ai';
-
-        if (firebaseClientEmail && firebasePrivateKey) {
-            initializeApp({
-                credential: cert({
-                    projectId: firebaseProjectId,
-                    clientEmail: firebaseClientEmail,
-                    privateKey: firebasePrivateKey.replace(/\\n/g, '\n'),
-                }),
-            });
-            console.log('[Firebase] ✅ Admin SDK initialized with service account credentials');
-        } else {
-            initializeApp({ projectId: firebaseProjectId });
-            console.log('[Firebase] ✅ Admin SDK initialized (project-only, no service account)');
-        }
-    }
-} catch (err) {
-    console.warn('[Firebase] ⚠️ Admin SDK initialization failed:', err.message);
-    console.warn('[Firebase] Token verification will fall back to X-User-Id header');
-}
 
 // ============================================================
 // Supabase Storage Client
@@ -510,38 +313,6 @@ app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 // Use gzip compression for responses
 app.use(compression());
 
-// Cookie parser — needed for admin session cookies
-app.use(cookieParser());
-
-// Serve static files with NO aggressive caching.
-//
-// Why no `max-age: 1d`?
-//   The previous configuration set `Cache-Control: public, max-age=86400`
-//   on every JS / CSS / HTML file. Combined with the (now-removed) cache-
-//   first Service Worker, that meant returning users kept running stale
-//   code for up to 24h after a deploy and only Ctrl+F5 would refresh.
-//
-// What we do instead:
-//   • ETag + Last-Modified are kept on (express.static default) so the
-//     browser revalidates cheaply via 304 Not Modified when content is
-//     unchanged.
-//   • HTML files are sent with `no-cache, no-store, must-revalidate` so
-//     the browser ALWAYS asks the server — the entry point must always
-//     be fresh.
-//   • JS / CSS / images use `no-cache, must-revalidate` so the browser
-//     revalidates every load but can still serve 304s.
-//   • The (now-removed) service-worker.js path is hard-pinned to
-//     `no-store` as a safety net in case it ever returns to the project.
-// Add headers to allow popups from external origins (prevents COOP popup blocking when using signInWithPopup)
-app.use((req, res, next) => {
-    // Allow cross-origin opener policy that permits popups to close the opener window
-    // same-origin-allow-popups is the recommended value for sites using window.open/popups like Firebase OAuth.
-    res.setHeader('Cross-Origin-Opener-Policy', 'same-origin-allow-popups');
-    // Also ensure COEP isn't blocking required resources for popups
-    res.setHeader('Cross-Origin-Embedder-Policy', 'unsafe-none');
-    next();
-});
-
 // For Vercel serverless: use /tmp for file storage (read-only filesystem in production)
 // For local: use public/uploads as fallback
 const isVercel = !!process.env.VERCEL || !!process.env.VERCEL_ENV;
@@ -562,7 +333,7 @@ try {
 app.use((req, res, next) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Session-Id');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Session-Id');
     res.setHeader('Access-Control-Allow-Credentials', 'true');
     if (req.method === 'OPTIONS') return res.sendStatus(204);
     next();
@@ -579,715 +350,14 @@ app.set('trust proxy', 1);
 // PAGE ROUTES
 // ============================================================
 
-// GET / — Password login page
-app.get('/', requireNoAuth, (req, res) => {
-    res.sendFile(path.join(__dirname, 'public', 'password.html'));
-});
-
-// GET /chat — Protected chat interface
-app.get('/chat', requireAuth, (req, res) => {
+// GET / — the VOSIL app (open access, no password gate)
+app.get('/', (req, res) => {
     res.sendFile(path.join(__dirname, 'public', 'chat.html'));
 });
 
-// POST /api/auth/login — Authenticate with password
-app.post('/api/auth/login', (req, res) => {
-    try {
-        const password = (req.body && typeof req.body.password === 'string')
-            ? req.body.password
-            : '';
-
-        if (!VOSIL_PASSWORD) {
-            return res.status(503).json({ success: false, error: 'Authentication not configured' });
-        }
-
-        if (!password) {
-            return res.status(400).json({ success: false, error: 'Password is required' });
-        }
-
-        // Length-safe constant-time comparison. We compare SHA-256 DIGESTS instead
-        // of raw buffers because crypto.timingSafeEqual THROWS a RangeError when
-        // the inputs differ in length. That uncaught crash previously returned an
-        // HTML 500 error page, which the login page misread as
-        // "Connection error. Please try again." — even for a simple typo.
-        const submitted = crypto.createHash('sha256').update(password, 'utf8').digest();
-        const expected = crypto.createHash('sha256').update(VOSIL_PASSWORD, 'utf8').digest();
-        if (!crypto.timingSafeEqual(submitted, expected)) {
-            diagnosePasswordMismatch(password, VOSIL_PASSWORD_RAW);
-            console.warn('[Auth] ⚠️ Failed authentication attempt (incorrect password)');
-            return res.status(401).json({ success: false, error: 'Incorrect password' });
-        }
-
-        // Password is correct — create a stateless signed session token
-        const sessionId = createSession();
-
-        // Set secure HttpOnly cookie
-        res.cookie(SESSION_COOKIE_NAME, sessionId, {
-            httpOnly: true,
-            secure: process.env.VERCEL || process.env.VERCEL_ENV ? true : false,
-            sameSite: 'lax',
-            maxAge: SESSION_EXPIRY,
-            path: '/'
-        });
-
-        console.log('[Auth] ✅ Successful authentication');
-        res.json({ success: true, message: 'Authentication successful' });
-    } catch (err) {
-        console.error('[Auth] ❌ Login error:', err.message);
-        res.status(500).json({ success: false, error: 'Login failed. Please try again.' });
-    }
-});
-
-// POST /api/auth/logout — Invalidate session
-app.post('/api/auth/logout', (req, res) => {
-    const sessionCookie = req.cookies[SESSION_COOKIE_NAME];
-    
-    if (sessionCookie) {
-        invalidateSession(sessionCookie);
-    }
-    
-    res.clearCookie(SESSION_COOKIE_NAME, { path: '/' });
-    console.log('[Auth] ✅ User logged out');
-    res.json({ success: true });
-});
-
-// ============================================================
-// ADMIN AUTHENTICATION SYSTEM
-// ============================================================
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD;
-
-// Store active admin sessions (token -> { authenticated: true, createdAt })
-const adminSessions = new Map();
-const ADMIN_SESSION_TTL = 24 * 60 * 60 * 1000; // 24 hours
-
-if (!ADMIN_PASSWORD) {
-    console.warn('[Admin] ⚠️ ADMIN_PASSWORD not set in .env — /admin route will be disabled');
-} else {
-    console.log('[Admin] ✅ Admin authentication enabled');
-}
-
-// Admin authentication middleware — checks for valid session cookie
-function requireAdminAuth(req, res, next) {
-    // If admin password is not configured, block all admin access
-    if (!ADMIN_PASSWORD) {
-        return res.status(503).send('Admin panel is not configured. Set ADMIN_PASSWORD in .env');
-    }
-
-    const token = req.cookies?.admin_token;
-    
-    if (token && adminSessions.has(token)) {
-        const session = adminSessions.get(token);
-        // Check if session is still valid
-        if (Date.now() - session.createdAt < ADMIN_SESSION_TTL) {
-            req.adminAuthenticated = true;
-            return next();
-        } else {
-            // Session expired — clean it up
-            adminSessions.delete(token);
-        }
-    }
-    
-    // Not authenticated — redirect to login or return 401 for API calls
-    if (req.path.startsWith('/api/admin/')) {
-        return res.status(401).json({ error: 'Unauthorized. Please login first.' });
-    }
-    
-    // For page requests, redirect to login
-    res.redirect('/admin/login');
-}
-
-// ============================================================
-// ADMIN LOGIN PAGE — server-rendered HTML (GET /admin)
-// ============================================================
-const ADMIN_LOGIN_PAGE = `<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Login — OXY AI</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: #0f0f13;
-            color: #e8e8ed;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-        }
-        .login-container {
-            background: #1a1a24;
-            border: 1px solid #2a2a3a;
-            border-radius: 16px;
-            padding: 40px;
-            width: 100%;
-            max-width: 400px;
-            box-shadow: 0 20px 60px rgba(0,0,0,0.5);
-        }
-        .login-logo {
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            gap: 10px;
-            margin-bottom: 8px;
-        }
-        .logo-ring {
-            width: 40px;
-            height: 40px;
-            border: 3px solid #a855f7;
-            border-radius: 50%;
-            position: relative;
-            overflow: hidden;
-            background: transparent;
-        }
-        .logo-ring::before {
-            content: '';
-            position: absolute;
-            width: 100%;
-            height: 50%;
-            background: #a855f7;
-            top: 0;
-            left: 0;
-            border-radius: 0 0 50% 50% / 0 0 100% 100%;
-        }
-        .logo-text { font-size: 28px; font-weight: 700; letter-spacing: 2px; }
-        .logo-text span:first-child { color: #a855f7; }
-        .logo-text span:last-child { color: #e8e8ed; }
-        h1 { text-align: center; font-size: 20px; font-weight: 600; margin-bottom: 28px; color: #c0c0d0; }
-        .form-group { margin-bottom: 20px; }
-        label { display: block; font-size: 14px; color: #8a8a9a; margin-bottom: 8px; }
-        input[type="password"] {
-            width: 100%;
-            padding: 14px 16px;
-            background: #0f0f13;
-            border: 1px solid #2a2a3a;
-            border-radius: 10px;
-            color: #e8e8ed;
-            font-size: 16px;
-            outline: none;
-            transition: border-color 0.2s;
-        }
-        input[type="password"]:focus { border-color: #a855f7; }
-        .login-btn {
-            width: 100%;
-            padding: 14px;
-            background: #a855f7;
-            color: #fff;
-            border: none;
-            border-radius: 10px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-        .login-btn:hover { background: #9333ea; }
-        .login-btn:disabled { opacity: 0.6; cursor: not-allowed; }
-        .error-msg {
-            background: #3b1a1a;
-            border: 1px solid #6b2a2a;
-            color: #f87171;
-            padding: 12px 16px;
-            border-radius: 10px;
-            margin-bottom: 20px;
-            font-size: 14px;
-            text-align: center;
-            display: none;
-        }
-        .error-msg.visible { display: block; }
-        .loading-spinner {
-            display: none;
-            width: 20px;
-            height: 20px;
-            border: 2px solid rgba(255,255,255,0.3);
-            border-top-color: #fff;
-            border-radius: 50%;
-            animation: spin 0.6s linear infinite;
-            margin: 0 auto;
-        }
-        .loading-spinner.visible { display: inline-block; }
-        .btn-text { display: inline; }
-        .btn-text.hidden { display: none; }
-        @keyframes spin { to { transform: rotate(360deg); } }
-        .footer { margin-top: 20px; text-align: center; color: #5a5a6a; font-size: 13px; }
-        .footer a { color: #a855f7; text-decoration: none; }
-        .footer a:hover { text-decoration: underline; }
-    </style>
-</head>
-<body>
-    <div class="login-container">
-        <div class="login-logo">
-            <div class="logo-ring"></div>
-            <div class="logo-text"><span>OXY</span><span>AI</span></div>
-        </div>
-        <h1>Admin Login</h1>
-        <div class="error-msg" id="error-msg"></div>
-        <form id="login-form" onsubmit="handleLogin(event)">
-            <div class="form-group">
-                <label for="password">Admin Password</label>
-                <input type="password" id="password" placeholder="Enter admin password" autocomplete="current-password" required>
-            </div>
-            <button type="submit" class="login-btn" id="login-btn">
-                <span class="btn-text" id="btn-text">Login</span>
-                <span class="loading-spinner" id="loading-spinner"></span>
-            </button>
-        </form>
-    </div>
-    <div class="footer">
-        <a href="/">← Back to OXY AI</a>
-    </div>
-    <script>
-        async function handleLogin(e) {
-            e.preventDefault();
-            const password = document.getElementById('password').value;
-            const errorMsg = document.getElementById('error-msg');
-            const loginBtn = document.getElementById('login-btn');
-            const btnText = document.getElementById('btn-text');
-            const spinner = document.getElementById('loading-spinner');
-            
-            errorMsg.classList.remove('visible');
-            loginBtn.disabled = true;
-            btnText.classList.add('hidden');
-            spinner.classList.add('visible');
-            
-            try {
-                const res = await fetch('/api/admin/login', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ password })
-                });
-                const data = await res.json();
-                
-                if (res.ok && data.success) {
-                    window.location.href = '/admin/dashboard';
-                } else {
-                    errorMsg.textContent = data.error || 'Wrong password';
-                    errorMsg.classList.add('visible');
-                    loginBtn.disabled = false;
-                    btnText.classList.remove('hidden');
-                    spinner.classList.remove('visible');
-                }
-            } catch (err) {
-                errorMsg.textContent = 'Connection error. Please try again.';
-                errorMsg.classList.add('visible');
-                loginBtn.disabled = false;
-                btnText.classList.remove('hidden');
-                spinner.classList.remove('visible');
-            }
-        }
-    </script>
-</body>
-</html>`;
-
-// ============================================================
-// ADMIN DASHBOARD PAGE — server-rendered HTML (GET /admin/dashboard)
-// ============================================================
-const ADMIN_DASHBOARD_PAGE = `<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Dashboard — OXY AI</title>
-    <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; }
-        body {
-            font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-            background: #0f0f13;
-            color: #e8e8ed;
-            min-height: 100vh;
-        }
-        .admin-header {
-            background: #1a1a24;
-            border-bottom: 1px solid #2a2a3a;
-            padding: 16px 32px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-        }
-        .admin-header-left {
-            display: flex;
-            align-items: center;
-            gap: 12px;
-        }
-        .logo-text { font-size: 22px; font-weight: 700; letter-spacing: 1px; }
-        .logo-text span:first-child { color: #a855f7; }
-        .logo-text span:last-child { color: #e8e8ed; }
-        .admin-badge {
-            background: #2a1a3a;
-            color: #a855f7;
-            padding: 4px 12px;
-            border-radius: 6px;
-            font-size: 12px;
-            font-weight: 600;
-            text-transform: uppercase;
-            letter-spacing: 1px;
-        }
-        .admin-header-right { display: flex; align-items: center; gap: 16px; }
-        .logout-btn {
-            padding: 8px 20px;
-            background: #2a2a3a;
-            color: #e8e8ed;
-            border: 1px solid #3a3a4a;
-            border-radius: 8px;
-            font-size: 14px;
-            font-weight: 500;
-            cursor: pointer;
-            transition: background 0.2s;
-            text-decoration: none;
-        }
-        .logout-btn:hover { background: #3a2a2a; border-color: #6b2a2a; color: #f87171; }
-        .back-btn {
-            padding: 8px 16px;
-            background: transparent;
-            color: #8a8a9a;
-            border: none;
-            font-size: 14px;
-            cursor: pointer;
-            text-decoration: none;
-            transition: color 0.2s;
-        }
-        .back-btn:hover { color: #a855f7; }
-        .dashboard-content {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 40px 24px;
-        }
-        .dashboard-title { font-size: 28px; font-weight: 700; margin-bottom: 8px; }
-        .dashboard-subtitle { color: #8a8a9a; margin-bottom: 32px; }
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-            gap: 20px;
-            margin-bottom: 40px;
-        }
-        .stat-card {
-            background: #1a1a24;
-            border: 1px solid #2a2a3a;
-            border-radius: 12px;
-            padding: 24px;
-        }
-        .stat-card h3 { font-size: 14px; color: #8a8a9a; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px; }
-        .stat-card .stat-value { font-size: 32px; font-weight: 700; color: #a855f7; }
-        .admin-section {
-            background: #1a1a24;
-            border: 1px solid #2a2a3a;
-            border-radius: 12px;
-            padding: 24px;
-            margin-bottom: 24px;
-        }
-        .admin-section h2 { font-size: 18px; font-weight: 600; margin-bottom: 16px; color: #c0c0d0; }
-        .admin-section p { color: #8a8a9a; line-height: 1.6; font-size: 14px; }
-        .info-row {
-            display: flex;
-            justify-content: space-between;
-            padding: 12px 0;
-            border-bottom: 1px solid #2a2a3a;
-            font-size: 14px;
-        }
-        .info-row:last-child { border-bottom: none; }
-        .info-label { color: #8a8a9a; }
-        .info-value { color: #e8e8ed; font-weight: 500; }
-        .status-indicator {
-            display: inline-flex;
-            align-items: center;
-            gap: 6px;
-        }
-        .status-dot {
-            width: 8px;
-            height: 8px;
-            border-radius: 50%;
-            background: #22c55e;
-        }
-        .status-dot.inactive { background: #6b7280; }
-        .status-dot.warning { background: #eab308; }
-    </style>
-</head>
-<body>
-    <div class="admin-header">
-        <div class="admin-header-left">
-            <div class="logo-text"><span>OXY</span><span>AI</span></div>
-            <span class="admin-badge">Admin</span>
-        </div>
-        <div class="admin-header-right">
-            <a href="/" class="back-btn">← Back to App</a>
-            <a href="/api/admin/logout" class="logout-btn">Logout</a>
-        </div>
-    </div>
-    <div class="dashboard-content">
-        <h1 class="dashboard-title">Analytics Dashboard</h1>
-        <p class="dashboard-subtitle">Overview of OXY AI system status and analytics</p>
-        
-        <div class="stats-grid">
-            <div class="stat-card">
-                <h3>Server Status</h3>
-                <div class="stat-value"><span class="status-indicator"><span class="status-dot" id="status-dot"></span> <span id="server-status">Online</span></span></div>
-            </div>
-            <div class="stat-card">
-                <h3>Online Now</h3>
-                <div class="stat-value" id="online-now">—</div>
-            </div>
-            <div class="stat-card">
-                <h3>Active Chats (30m)</h3>
-                <div class="stat-value" id="active-chats">—</div>
-            </div>
-            <div class="stat-card">
-                <h3>Today's Messages</h3>
-                <div class="stat-value" id="today-messages">—</div>
-            </div>
-            <div class="stat-card">
-                <h3>Total Messages</h3>
-                <div class="stat-value" id="total-messages">—</div>
-            </div>
-            <div class="stat-card">
-                <h3>API Keys</h3>
-                <div class="stat-value" id="api-key-count">—</div>
-            </div>
-        </div>
-        
-        <div class="admin-section">
-            <h2>Activity Overview</h2>
-            <div class="info-row">
-                <span class="info-label">Online Now (last 5 min)</span>
-                <span class="info-value" id="online-now-detail">—</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Active Users (last 10 min)</span>
-                <span class="info-value" id="active-10min">—</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Active Chats (last 30 min)</span>
-                <span class="info-value" id="active-chats-detail">—</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Total Sessions (all time)</span>
-                <span class="info-value" id="total-sessions">—</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Today's Messages</span>
-                <span class="info-value" id="today-messages-detail">—</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Today's Uploads</span>
-                <span class="info-value" id="today-uploads">—</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Total Messages (all time)</span>
-                <span class="info-value" id="total-messages-detail">—</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Total Uploads (all time)</span>
-                <span class="info-value" id="total-uploads">—</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Chat Sessions</span>
-                <span class="info-value" id="active-chat-sessions">—</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Memory Sessions</span>
-                <span class="info-value" id="memory-sessions">—</span>
-            </div>
-        </div>
-        
-        <div class="admin-section">
-            <h2>System Information</h2>
-            <div class="info-row">
-                <span class="info-label">Platform</span>
-                <span class="info-value" id="platform">—</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Node.js Version</span>
-                <span class="info-value" id="node-version">—</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Uptime</span>
-                <span class="info-value" id="uptime">—</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Server Time</span>
-                <span class="info-value" id="server-time">—</span>
-            </div>
-        </div>
-        
-        <div class="admin-section">
-            <h2>Security</h2>
-            <div class="info-row">
-                <span class="info-label">Authentication</span>
-                <span class="info-value status-indicator"><span class="status-dot"></span> Active</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Session Duration</span>
-                <span class="info-value">24 hours</span>
-            </div>
-            <div class="info-row">
-                <span class="info-label">Session Storage</span>
-                <span class="info-value">Server-side (in-memory)</span>
-            </div>
-        </div>
-    </div>
-    <script>
-        async function loadStats() {
-            try {
-                const res = await fetch('/api/admin/stats');
-                if (res.status === 401) {
-                    window.location.href = '/admin/login';
-                    return;
-                }
-                const data = await res.json();
-                
-                // Update dashboard with real data
-                document.getElementById('server-status').textContent = data.serverStatus || 'Online';
-                document.getElementById('online-now').textContent = data.onlineNow || 0;
-                document.getElementById('active-chats').textContent = data.activeChats || 0;
-                document.getElementById('today-messages').textContent = data.todayMessages || 0;
-                document.getElementById('total-messages').textContent = data.totalMessages || 0;
-                document.getElementById('api-key-count').textContent = data.apiKeyCount || 0;
-                
-                // Detail section
-                document.getElementById('online-now-detail').textContent = data.onlineNow || 0;
-                document.getElementById('active-10min').textContent = data.activeChatsLast10min || 0;
-                document.getElementById('active-chats-detail').textContent = data.activeChats || 0;
-                document.getElementById('total-sessions').textContent = data.totalSessions || 0;
-                document.getElementById('today-messages-detail').textContent = data.todayMessages || 0;
-                document.getElementById('today-uploads').textContent = data.todayUploads || 0;
-                document.getElementById('total-messages-detail').textContent = data.totalMessages || 0;
-                document.getElementById('total-uploads').textContent = data.totalUploads || 0;
-                document.getElementById('active-chat-sessions').textContent = data.activeChatSessions || 0;
-                document.getElementById('memory-sessions').textContent = data.memorySessions || 0;
-                document.getElementById('platform').textContent = data.platform || '—';
-                document.getElementById('node-version').textContent = data.nodeVersion || '—';
-                
-                const uptime = data.uptime || 0;
-                const hours = Math.floor(uptime / 3600);
-                const mins = Math.floor((uptime % 3600) / 60);
-                document.getElementById('uptime').textContent = hours + 'h ' + mins + 'm';
-                document.getElementById('server-time').textContent = data.serverTime || '—';
-            } catch (err) {
-                console.error('Failed to load stats:', err);
-            }
-        }
-        loadStats();
-        setInterval(loadStats, 15000);
-    </script>
-</body>
-</html>`;
-
-// ============================================================
-// ADMIN ROUTES
-// ============================================================
-
-// GET /admin — redirect to login page or dashboard if already authenticated
-app.get('/admin', (req, res) => {
-    const token = req.cookies?.admin_token;
-    if (token && adminSessions.has(token)) {
-        const session = adminSessions.get(token);
-        if (Date.now() - session.createdAt < ADMIN_SESSION_TTL) {
-            return res.redirect('/admin/dashboard');
-        }
-    }
-    res.send(ADMIN_LOGIN_PAGE);
-});
-
-// GET /admin/login — login page
-app.get('/admin/login', (req, res) => {
-    const token = req.cookies?.admin_token;
-    if (token && adminSessions.has(token)) {
-        const session = adminSessions.get(token);
-        if (Date.now() - session.createdAt < ADMIN_SESSION_TTL) {
-            return res.redirect('/admin/dashboard');
-        }
-    }
-    res.send(ADMIN_LOGIN_PAGE);
-});
-
-// GET /admin/dashboard — protected analytics dashboard
-app.get('/admin/dashboard', requireAdminAuth, (req, res) => {
-    res.send(ADMIN_DASHBOARD_PAGE);
-});
-
-// POST /api/admin/login — authenticate admin
-app.post('/api/admin/login', (req, res) => {
-    const { password } = req.body;
-    
-    if (!ADMIN_PASSWORD) {
-        return res.status(503).json({ success: false, error: 'Admin panel is not configured.' });
-    }
-    
-    if (!password) {
-        return res.status(400).json({ success: false, error: 'Password is required.' });
-    }
-    
-    if (password === ADMIN_PASSWORD) {
-        // Generate a session token
-        const token = crypto.randomBytes(32).toString('hex');
-        adminSessions.set(token, { authenticated: true, createdAt: Date.now() });
-        
-        // Set secure httpOnly cookie
-        res.cookie('admin_token', token, {
-            httpOnly: true,
-            secure: !!process.env.VERCEL || !!process.env.VERCEL_ENV,
-            sameSite: 'lax',
-            maxAge: ADMIN_SESSION_TTL,
-            path: '/'
-        });
-        
-        console.log('[Admin] ✅ Successful admin login');
-        return res.json({ success: true });
-    } else {
-        console.warn('[Admin] ❌ Failed login attempt');
-        return res.status(401).json({ success: false, error: 'Wrong password' });
-    }
-});
-
-// GET /api/admin/logout — clear session cookie
-app.get('/api/admin/logout', (req, res) => {
-    const token = req.cookies?.admin_token;
-    if (token) {
-        adminSessions.delete(token);
-    }
-    res.clearCookie('admin_token', { path: '/' });
-    console.log('[Admin] ✅ Admin logged out');
-    res.redirect('/admin/login');
-});
-
-// GET /api/admin/stats — fetch dashboard statistics (protected, real data)
-app.get('/api/admin/stats', requireAdminAuth, (req, res) => {
-    const analytics = getAnalyticsSummary();
-    res.json({
-        serverStatus: 'Online',
-        activeChats: analytics.activeChats,
-        activeChatsLast10min: analytics.activeChatsLast10min,
-        onlineNow: analytics.onlineNow,
-        totalSessions: analytics.totalSessions,
-        totalMessages: analytics.totalMessages,
-        todayMessages: analytics.todayMessages,
-        totalUploads: analytics.totalUploads,
-        todayUploads: analytics.todayUploads,
-        activeChatSessions: chatSessions?.size || 0,
-        apiKeyCount: API_KEYS?.length || 0,
-        memorySessions: CONVERSATION_MEMORY?.size || 0,
-        platform: process.platform,
-        nodeVersion: process.version,
-        uptime: process.uptime(),
-        serverTime: new Date().toLocaleString('en-US', { 
-            weekday: 'long', 
-            year: 'numeric', 
-            month: 'long', 
-            day: 'numeric',
-            hour: '2-digit', 
-            minute: '2-digit',
-            second: '2-digit',
-            timeZoneName: 'short'
-        })
-    });
-});
-
-// POST /api/admin/heartbeat — client heartbeat to track active users
-app.post('/api/admin/heartbeat', (req, res) => {
-    const sessionId = req.body?.sessionId || req.headers['x-session-id'];
-    if (sessionId) {
-        trackUserActivity(sessionId, 'heartbeat');
-    }
-    res.json({ success: true });
+// GET /chat — the VOSIL app
+app.get('/chat', (req, res) => {
+    res.sendFile(path.join(__dirname, 'public', 'chat.html'));
 });
 
 // ============================================================
@@ -2298,7 +1368,7 @@ async function buildFileParts(files, client = null) {
 
 // file upload endpoint
 
-app.post('/api/upload', requireAuth, upload.array('files', 10), async (req, res) => {
+app.post('/api/upload', upload.array('files', 10), async (req, res) => {
     try {
         const files = req.files || [];
         if (files.length === 0) return res.status(400).json({ error: 'No files uploaded' });
@@ -2321,7 +1391,7 @@ app.post('/api/upload', requireAuth, upload.array('files', 10), async (req, res)
     }
 });
 
-app.post('/api/preprocess-files', requireAuth, upload.array('files', 10), async (req, res) => {
+app.post('/api/preprocess-files', upload.array('files', 10), async (req, res) => {
     const files = req.files || [];
     if (files.length === 0) return res.status(400).json({ error: 'No files uploaded' });
 
@@ -2367,7 +1437,7 @@ app.post('/api/preprocess-files', requireAuth, upload.array('files', 10), async 
 // IMAGE GENERATION ENDPOINT — Cloudflare Workers AI + Supabase Storage
 // ============================================================
 
-app.post('/api/generate-image', requireAuth, async (req, res) => {
+app.post('/api/generate-image', async (req, res) => {
     try {
         const { prompt, sessionId } = req.body;
         if (!prompt || typeof prompt !== 'string' || prompt.trim().length === 0) {
@@ -2414,7 +1484,7 @@ app.post('/api/generate-image', requireAuth, async (req, res) => {
 // IMAGE EDITING ENDPOINT — Cloudflare Workers AI + Supabase Storage
 // ============================================================
 
-app.post('/api/edit-image', requireAuth, upload.single('file'), async (req, res) => {
+app.post('/api/edit-image', upload.single('file'), async (req, res) => {
     try {
         const instruction = (req.body.instruction || '').trim();
         const sessionId = req.body.sessionId;
@@ -2494,7 +1564,7 @@ function conversationMemoryMiddleware(req, res, next) {
 
 app.use('/api/chat', conversationMemoryMiddleware);
 
-app.get('/api/context/:sessionId', requireAuth, (req, res, next) => {
+app.get('/api/context/:sessionId', (req, res, next) => {
     try {
         const { sessionId } = req.params;
         res.json({ context: getConversationContext(sessionId, 20) });
@@ -2712,242 +1782,10 @@ ${resultsBlock}
 // CONVERSATIONS & CHAT ENDPOINTS
 // ============================================================
 
-// ─── Firebase Token Verification ───
-// The client sends the Firebase ID token in the Authorization header.
-// We verify it using the Firebase Admin SDK.
-async function verifyFirebaseToken(token) {
-    if (!token || typeof token !== 'string') return null;
-    try {
-        const decodedToken = await getAuth().verifyIdToken(token);
-        return decodedToken;
-    } catch (err) {
-        console.error('[Auth] ❌ Firebase token verification failed:', err.message);
-        return null;
-    }
-}
-
-// ============================================================
-// FLUTTER APP AUTH — JWT ACCESS TOKENS & REFRESH TOKENS
-// ============================================================
-// The Flutter app authenticates through the website (source=app).
-// After a successful login/signup/Google auth, the backend issues:
-//   • a signed JWT access token (verified by verifyAccessToken below)
-//   • an opaque refresh token (hashed before storage)
-// The access token embeds the Firebase uid so every existing
-// middleware (conversations, etc.) keeps working unchanged.
-
-const JWT_SECRET = process.env.JWT_SECRET || crypto.randomBytes(32).toString('hex');
-const ACCESS_TOKEN_TTL = 30 * 24 * 60 * 60;          // 30 days (seconds)
-const REFRESH_TOKEN_TTL = 90 * 24 * 60 * 60 * 1000;  // 90 days (ms)
-
-// sha256(refreshToken) -> { uid, name, email, avatar, expiresAt }
-const refreshTokenMemory = new Map();
-
-function sha256(value) {
-    return crypto.createHash('sha256').update(value).digest('hex');
-}
-
-function signAccessToken(profile) {
-    return jwt.sign(
-        {
-            uid: profile.uid,
-            name: profile.name || '',
-            email: profile.email || '',
-            avatar: profile.avatar || null,
-        },
-        JWT_SECRET,
-        {
-            subject: profile.uid,
-            issuer: 'vosil',
-            audience: 'vosil',
-            algorithm: 'HS256',
-            expiresIn: ACCESS_TOKEN_TTL,
-        }
-    );
-}
-
-function verifyAccessToken(token) {
-    if (!token || typeof token !== 'string') return null;
-    try {
-        return jwt.verify(token, JWT_SECRET, { algorithms: ['HS256'], issuer: 'vosil', audience: 'vosil' });
-    } catch (err) {
-        return null;
-    }
-}
-
-async function persistRefreshToken(rawToken, profile) {
-    const hash = sha256(rawToken);
-    const payload = {
-        uid: profile.uid,
-        name: profile.name || '',
-        email: profile.email || '',
-        avatar: profile.avatar || null,
-        expiresAt: Date.now() + REFRESH_TOKEN_TTL,
-    };
-    if (isDatabaseReady()) {
-        try {
-            await pool.query(
-                `INSERT INTO auth_refresh_tokens (token_hash, user_id, profile, expires_at)
-                 VALUES ($1, $2, $3, $4)
-                 ON CONFLICT (token_hash) DO UPDATE SET
-                   expires_at = EXCLUDED.expires_at,
-                   profile = EXCLUDED.profile`,
-                [hash, payload.uid, payload, new Date(payload.expiresAt).toISOString()]
-            );
-            return;
-        } catch (err) {
-            console.warn('[AppAuth] ⚠️ Refresh token DB persist failed, using memory:', err.message);
-        }
-    }
-    refreshTokenMemory.set(hash, payload);
-}
-
-async function findRefreshToken(rawToken) {
-    if (!rawToken || typeof rawToken !== 'string') return null;
-    const hash = sha256(rawToken);
-    if (isDatabaseReady()) {
-        try {
-            const result = await pool.query(
-                'SELECT profile, expires_at FROM auth_refresh_tokens WHERE token_hash = $1',
-                [hash]
-            );
-            if (result.rows.length > 0) {
-                const row = result.rows[0];
-                const expiresAt = new Date(row.expires_at).getTime();
-                if (Date.now() > expiresAt) {
-                    await deleteRefreshToken(rawToken);
-                    return null;
-                }
-                const p = row.profile || {};
-                return { uid: p.uid, name: p.name || '', email: p.email || '', avatar: p.avatar || null };
-            }
-        } catch (err) {
-            console.warn('[AppAuth] ⚠️ Refresh token DB lookup failed, using memory:', err.message);
-        }
-    }
-    const payload = refreshTokenMemory.get(hash);
-    if (!payload) return null;
-    if (Date.now() > payload.expiresAt) {
-        refreshTokenMemory.delete(hash);
-        return null;
-    }
-    return { uid: payload.uid, name: payload.name, email: payload.email, avatar: payload.avatar };
-}
-
-async function deleteRefreshToken(rawToken) {
-    const hash = sha256(rawToken);
-    refreshTokenMemory.delete(hash);
-    if (isDatabaseReady()) {
-        try {
-            await pool.query('DELETE FROM auth_refresh_tokens WHERE token_hash = $1', [hash]);
-        } catch (err) {
-            console.warn('[AppAuth] ⚠️ Refresh token DB delete failed:', err.message);
-        }
-    }
-}
-
-async function issueRefreshToken(profile) {
-    const rawToken = crypto.randomBytes(48).toString('base64url');
-    await persistRefreshToken(rawToken, profile);
-    return rawToken;
-}
-
-// Best-effort enrichment of a user profile from the Firestore users doc.
-async function getUserProfileFromFirestore(uid) {
-    try {
-        const snap = await getFirestore().collection('users').doc(uid).get();
-        if (snap.exists) {
-            const d = snap.data();
-            return {
-                uid,
-                name: d.name || d.displayName || '',
-                email: d.email || '',
-                avatar: d.photoURL || d.avatar || null,
-            };
-        }
-    } catch (err) {
-        console.warn('[AppAuth] ⚠️ Firestore profile lookup failed (using token claims):', err.message);
-    }
-    return null;
-}
-
-function profileFromDecoded(decoded) {
-    return {
-        uid: decoded.uid,
-        name: decoded.name || decoded.displayName || '',
-        email: decoded.email || '',
-        avatar: decoded.picture || decoded.photoURL || null,
-    };
-}
-
-// Resolve an authenticated user from either a VOSIL JWT or a Firebase ID token.
-async function resolveProfileFromRequest(req) {
-    const authHeader = req.headers.authorization;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) return null;
-    const token = authHeader.slice(7);
-
-    const appJwt = verifyAccessToken(token);
-    if (appJwt && appJwt.uid) {
-        return { uid: appJwt.uid, name: appJwt.name || '', email: appJwt.email || '', avatar: appJwt.avatar || null };
-    }
-
-    const decoded = await verifyFirebaseToken(token);
-    if (decoded && decoded.uid) return profileFromDecoded(decoded);
-
-    return null;
-}
-
-// ============================================================
-// FLUTTER APP AUTH API
-// ============================================================
-
-// ============================================================
-// Auth endpoints removed — will be re-implemented with password system in Part 2
-// ============================================================
-
-// Auth middleware for conversation API
-
+// All conversations are stored under a single 'anonymous' bucket — the app is
+// open access, so there is no per-user identity to scope by.
 async function resolveConversationUser(req, res, next) {
-    try {
-        const authHeader = req.headers.authorization;
-
-        if (authHeader && authHeader.startsWith('Bearer ')) {
-            const token = authHeader.slice(7);
-
-            // 1. Try the VOSIL app JWT first (Flutter deep-link auth).
-            const appJwt = verifyAccessToken(token);
-            if (appJwt && appJwt.uid) {
-                req.userId = appJwt.uid;
-                req.firebaseUser = appJwt;
-                req.authType = 'app';
-                console.log(`[Auth] ✅ App JWT user: ${appJwt.uid.substring(0, 12)}...`);
-                return next();
-            }
-
-            // 2. Fall back to a Firebase ID token (website auth).
-            const decoded = await verifyFirebaseToken(token);
-            if (decoded && decoded.uid) {
-                req.userId = decoded.uid;
-                req.firebaseUser = decoded;
-                console.log(`[Auth] ✅ Authenticated user: ${decoded.uid.substring(0, 12)}...`);
-                return next();
-            }
-
-            // ⚠️ No verified identity. We deliberately do NOT scope conversations by the
-            // client-supplied X-User-Id header: an unverifiable header would let the same
-            // browser persist chats under different user_ids between page loads (e.g. when a
-            // legacy Firebase session appears or expires), which makes saved chats "disappear"
-            // after a refresh. Cookie-auth (password) users always map to the stable
-            // 'anonymous' bucket instead.
-            console.warn('[Auth] ⚠️ Bearer token present but verification failed — using anonymous identity');
-            req.userId = 'anonymous';
-        } else {
-            // No Bearer token — plain password-cookie web session → stable identity.
-            req.userId = 'anonymous';
-        }
-    } catch {
-        req.userId = 'anonymous';
-    }
+    req.userId = 'anonymous';
     next();
 }
 
@@ -3113,7 +1951,7 @@ async function checkConversationOwnership(conversationId, userId) {
 
 // GET /api/conversations - Get conversations for the authenticated user
 
-app.get('/api/conversations', requireAuth, resolveConversationUser, async (req, res) => {
+app.get('/api/conversations', resolveConversationUser, async (req, res) => {
     try {
         if (!isDatabaseReady()) {
             const rows = await listFallbackConversations(req.userId);
@@ -3132,7 +1970,7 @@ app.get('/api/conversations', requireAuth, resolveConversationUser, async (req, 
 
 //  Save a conversation
 
-app.post('/api/conversations', requireAuth, resolveConversationUser, async (req, res) => {
+app.post('/api/conversations', resolveConversationUser, async (req, res) => {
     try {
         const { id, title, messages } = req.body;
         if (!id) return res.status(400).json({ error: 'Conversation ID required' });
@@ -3152,7 +1990,7 @@ app.post('/api/conversations', requireAuth, resolveConversationUser, async (req,
 
 //  Get messages for a conversation
 
-app.get('/api/conversations/:id/messages', requireAuth, resolveConversationUser, async (req, res) => {
+app.get('/api/conversations/:id/messages', resolveConversationUser, async (req, res) => {
     try {
         if (!isDatabaseReady()) {
             const convos = await listFallbackConversations(req.userId);
@@ -3188,7 +2026,7 @@ app.get('/api/conversations/:id/messages', requireAuth, resolveConversationUser,
 });
 
 // Rename a conversation
-app.put('/api/conversations/:id', requireAuth, resolveConversationUser, async (req, res) => {
+app.put('/api/conversations/:id', resolveConversationUser, async (req, res) => {
     try {
         const { title } = req.body;
         if (!title) return res.status(400).json({ error: 'Title required' });
@@ -3215,7 +2053,7 @@ app.put('/api/conversations/:id', requireAuth, resolveConversationUser, async (r
 });
 
 // Delete a conversation
-app.delete('/api/conversations/:id', requireAuth, resolveConversationUser, async (req, res) => {
+app.delete('/api/conversations/:id', resolveConversationUser, async (req, res) => {
     try {
         if (!isDatabaseReady()) {
             const ok = await deleteFallbackConversation(req.params.id, req.userId);
@@ -3251,7 +2089,7 @@ function validateSessionId(id) {
     return null;
 }
 
-app.post('/api/chat', requireAuth, upload.array('files', 10), async (req, res) => {
+app.post('/api/chat', upload.array('files', 10), async (req, res) => {
     try {
         let message = (typeof req.body.message === 'string') ? req.body.message : '';
         let sessionId = validateSessionId(req.body.sessionId);

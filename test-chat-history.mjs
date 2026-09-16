@@ -1,5 +1,5 @@
 // End-to-end test for the chat history / conversation persistence flow.
-// Tests: login -> create conversation (POST /api/conversations) -> list (GET)
+// Tests: create conversation (POST /api/conversations) -> list (GET)
 //        -> get messages (GET /api/conversations/:id/messages) -> delete.
 // Usage:  node test-chat-history.mjs           (against a running server)
 //         node test-chat-history.mjs <baseUrl>
@@ -7,7 +7,6 @@ import dotenv from 'dotenv';
 dotenv.config();
 
 const BASE = process.argv[2] || 'http://localhost:3014';
-const PASSWORD = process.env.VOSIL_PASSWORD;
 
 let failures = 0;
 function check(name, cond, extra = '') {
@@ -35,15 +34,6 @@ let cookie = '';
 {
     const r = await request('/api/health');
     check('Health endpoint reachable', r.status === 200, `status=${r.status}`);
-}
-
-// 2) Login
-{
-    const r = await request('/api/auth/login', { method: 'POST', body: { password: PASSWORD || 'wrong' } });
-    check('Login succeeds', r.status === 200, `status=${r.status}`);
-    const sc = r.setCookie;
-    if (sc) cookie = sc.split(';')[0];
-    check('Login sets session cookie', !!cookie);
 }
 
 const testId = 'sess_e2e_' + Date.now().toString(36);
@@ -103,12 +93,7 @@ if (process.env.CALLER_RESTART === '1') {
     for (let i = 0; i < 10 && !ok; i++) {
         try {
             const r = await request('/api/conversations', { cookie });
-            // New server process has an empty in-memory SESSION_STORE, so re-login first.
             if (r.status === 200) { ok = true; }
-            else if (r.status === 401) {
-                const lr = await request('/api/auth/login', { method: 'POST', body: { password: PASSWORD } });
-                cookie = (lr.setCookie || '').split(';')[0];
-            }
         } catch { await new Promise(r => setTimeout(r, 1000)); }
     }
     const r = await request('/api/conversations', { cookie });
